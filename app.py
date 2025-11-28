@@ -407,12 +407,30 @@ def show_dashboard():
         """, unsafe_allow_html=True)
     
     with col3:
-        # Current Time
-        current_time = get_current_time()
+        # 前回のレポート出力日時
+        settings_sheet = get_sheet("settings")
+        last_report_at = "未記録"
+        if settings_sheet:
+            all_data = settings_sheet.get_all_values()
+            for row in all_data:
+                if len(row) >= 2 and row[0] == "last_report_at":
+                    last_report_at = row[1] if row[1] else "未記録"
+                    break
+        
+        # 日時を短縮表示（YYYY-MM-DD HH:MM形式）
+        display_time = last_report_at
+        if last_report_at != "未記録" and len(last_report_at) > 16:
+            # YYYY-MM-DD HH:MM:SS から YYYY-MM-DD HH:MM に変換
+            try:
+                dt = datetime.strptime(last_report_at, '%Y-%m-%d %H:%M:%S')
+                display_time = dt.strftime('%Y-%m-%d %H:%M')
+            except:
+                display_time = last_report_at
+        
         st.markdown(f"""
         <div style="background: rgba(14, 17, 23, 0.8); padding: 1rem; border: 1px solid rgba(0, 255, 255, 0.3); border-radius: 4px; text-align: center;">
-            <div style="color: #4dabf7; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">現在時刻</div>
-            <div style="color: #fff; font-size: 1.2rem; font-family: 'Courier New', monospace; letter-spacing: 0.1em;">{current_time}</div>
+            <div style="color: #4dabf7; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">前回レポート出力</div>
+            <div style="color: #fff; font-size: 1rem; font-family: 'Courier New', monospace; letter-spacing: 0.05em; line-height: 1.4;">{display_time}</div>
         </div>
         """, unsafe_allow_html=True)
     
