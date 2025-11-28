@@ -180,6 +180,23 @@ def inject_custom_css():
     [data-testid="stMetricLabel"] {{
         color: {COLORS['text_dim']} !important;
     }}
+
+    /* タブのスタイル調整（選択中タブの赤色を上書き） */
+    div[data-testid="stTabs"] button[role="tab"] {{
+        color: {COLORS['text_dim']} !important;
+    }}
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+        color: {COLORS['accent_cyan']} !important;
+        border-bottom: 2px solid {COLORS['accent_cyan']} !important;
+    }}
+    /* アニメーションする下線バーの色も上書き（BaseWeb Tabs） */
+    div[data-baseweb="tab-list"] > button[aria-selected="true"]::after {{
+        border-bottom: 2px solid {COLORS['accent_cyan']} !important;
+    }}
+    /* もしハイライトバー要素が使われている場合はこちらも上書き */
+    div[data-baseweb="tab-highlight"] {{
+        background-color: {COLORS['accent_cyan']} !important;
+    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -373,24 +390,22 @@ def render_dashboard(manager):
     if st.session_state.get("show_idea_form", False):
         with st.expander("✏️ アイデアを登録する", expanded=True):
             with st.form("idea_quick_add_form"):
-                idea_title = st.text_input("アイデアタイトル (必須)")
-                idea_category = st.selectbox("カテゴリ", list(CATEGORY_ICONS.keys()))
-                idea_memo = st.text_area("メモ / 補足", height=4)
+                idea_content = st.text_area("アイデア内容 (必須)", height=4)
 
                 submitted_idea = st.form_submit_button("このアイデアを保存する", use_container_width=True)
                 if submitted_idea:
-                    if idea_title:
+                    if idea_content:
                         new_idea_id = manager.get_next_id("ideas")
-                        # 想定カラム: id, title, category, memo, created_at
-                        ok = manager.add_row("ideas", [new_idea_id, idea_title, idea_category, idea_memo, get_now_jst()])
+                        # カラム構成: id, content, created_at
+                        ok = manager.add_row("ideas", [new_idea_id, idea_content, get_now_jst()])
                         if ok:
-                            add_log(f"新規アイデア追加: {idea_title}")
+                            add_log(f"新規アイデア追加: {idea_content[:20]}...")
                             st.success("アイデアを保存しました！")
                             st.session_state["show_idea_form"] = False
                             time.sleep(0.5)
                             st.rerun()
                     else:
-                        st.error("アイデアタイトルを入力してください。")
+                        st.error("アイデア内容を入力してください。")
 
     # --- HUD (上部ステータス) ---
     st.markdown('<div class="header-hud">', unsafe_allow_html=True)
@@ -671,6 +686,69 @@ def render_report_generator(manager):
         st.markdown("---")
         st.caption("※ Noteやブログに貼り付ける場合は、左のテキストをコピーしてください。")
 
+
+def render_assets_and_ideas(manager):
+    """資産・アイデアBOX画面"""
+    st.title("📦 資産・アイデアBOX")
+    st.caption("アイデアのストックや各種資産をここから確認できます")
+
+    tab_ideas, tab_assets = st.tabs(["💡 アイデア一覧", "📚 その他の資産（準備中）"])
+
+    # --- アイデア一覧タブ ---
+    with tab_ideas:
+        # ideasシートを直接読み込み（ヘッダー行を明示的に扱う）
+        try:
+            ideas_sheet = manager.spreadsheet.worksheet("ideas")
+            values = ideas_sheet.get_all_values()
+        except gspread.exceptions.WorksheetNotFound:
+            values = []
+        except Exception as e:
+            st.error(f"ideasシートの読み込みでエラーが発生しました: {e}")
+            values = []
+
+        # 1行目をヘッダーとして解釈し、2行目以降をデータとして扱う
+        if not values or len(values) <= 1:
+            st.info("まだアイデアが登録されていません。ダッシュボード上部の「新しいアイデアを追加する」ボタンから登録できます。")
+        else:
+            headers = values[0]
+            rows = values[1:]
+            df_ideas = pd.DataFrame(rows, columns=headers)
+
+            # 期待するカラム名を揃える（ユーザー要望: id, content, created_at）
+            # もし古いカラム名(title等)が残っていても、できるだけ content に寄せる
+            if "content" not in df_ideas.columns:
+                if "title" in df_ideas.columns:
+                    df_ideas.rename(columns={"title": "content"}, inplace=True)
+
+            # フィルタUI
+            keyword = st.text_input("キーワードで絞り込み", placeholder="アイデア内容から検索")
+
+            # 絞り込み処理（contentカラム前提 / なければスキップ）
+            if "content" in df_ideas.columns and keyword:
+                mask = df_ideas["content"].astype(str).str.contains(keyword, case=False)
+                df_ideas = df_ideas[mask]
+
+            # 日付があれば新しい順に
+            if "created_at" in df_ideas.columns:
+                try:
+                    df_ideas["created_at"] = pd.to_datetime(df_ideas["created_at"])
+                    df_ideas = df_ideas.sort_values("created_at", ascending=False)
+                except Exception:
+                    pass
+
+            # 表示用の列順を調整（id, content, created_at）
+            display_cols = [c for c in ["id", "content", "created_at"] if c in df_ideas.columns]
+            st.subheader("💡 ストックされたアイデア")
+            if display_cols:
+                st.dataframe(df_ideas[display_cols], use_container_width=True, hide_index=True)
+            else:
+                # 想定外のカラム構成でも、とりあえず全列を表示
+                st.dataframe(df_ideas, use_container_width=True, hide_index=True)
+
+    # --- その他の資産タブ（将来拡張用） ---
+    with tab_assets:
+        st.info("今後、プロンプト集やテンプレートなどの資産をここに整理していく予定です。")
+
 # ==========================================
 # 6. メイン実行関数
 # ==========================================
@@ -706,8 +784,7 @@ def main():
     elif page == "CAMPAIGN":
         render_project_manager(manager)
     elif page == "ASSETS":
-        st.title("📦 資産・アイデアBOX")
-        st.info("ここにプロンプト集やアイデアメモ機能を実装できます")
+        render_assets_and_ideas(manager)
     elif page == "REPORT":
         render_report_generator(manager)
 
