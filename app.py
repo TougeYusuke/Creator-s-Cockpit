@@ -368,7 +368,7 @@ def get_system_log():
     """システムログを取得"""
     if 'system_log' not in st.session_state:
         st.session_state.system_log = [
-            f"> [{get_current_time()}] システム起動。おかえりなさい、コマンダー。",
+            f"> [{get_current_time()}] システム起動しました。",
         ]
     return st.session_state.system_log
 
@@ -390,18 +390,18 @@ def show_dashboard():
     
     with col1:
         st.markdown("""
-        <h1 style="margin: 0; font-size: 2rem;">ミッドナイトコマンド</h1>
-        <p style="color: #9ca3af; font-size: 0.8rem; letter-spacing: 0.2em; margin: 0;">クリエイターズコックピット // ユニット01</p>
+        <h1 style="margin: 0; font-size: 2rem;">Creator's Cockpit</h1>
+        <p style="color: #9ca3af; font-size: 0.8rem; letter-spacing: 0.2em; margin: 0;">クリエイター活動管理ツール</p>
         """, unsafe_allow_html=True)
     
     with col2:
         # Daily EXP
-        daily_exp = st.session_state.get('daily_exp', 150)
+        daily_exp = st.session_state.get('daily_exp', 0)
         st.markdown(f"""
         <div style="background: rgba(14, 17, 23, 0.8); padding: 1rem; border: 1px solid rgba(0, 255, 255, 0.3); border-radius: 4px;">
-            <div style="color: #00FFFF; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;">本日の経験値</div>
+            <div style="color: #00FFFF; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;">今日の達成数</div>
             <div style="color: #fff; font-size: 1.5rem; font-weight: bold;">
-                {daily_exp} <span style="color: #10b981; font-size: 0.8rem; animation: pulse 2s infinite;">+50</span>
+                {daily_exp} <span style="color: #10b981; font-size: 0.8rem;">件</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -418,44 +418,6 @@ def show_dashboard():
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # クイックツール（Skill Bar）
-    st.markdown("""
-    <div class="section-title">
-        > スキルバー_
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    quick_texts = {
-        "スタンププロモ [Q]": "#スタンプ #プロモーション #Lineスタンプ",
-        "ブログリンク [W]": "#ブログ #アウトプット #note",
-        "Note紹介 [R]": "#Note #紹介 #クリエイター",
-        "デプロイ [E]": "#デプロイ #リリース #公開"
-    }
-    
-    with col1:
-        if st.button("スタンププロモ [Q]", key="skill_stamp", use_container_width=True):
-            st.code(quick_texts["スタンププロモ [Q]"], language=None)
-            add_log_entry("クイックツール起動: スタンププロモ")
-    
-    with col2:
-        if st.button("ブログリンク [W]", key="skill_blog", use_container_width=True):
-            st.code(quick_texts["ブログリンク [W]"], language=None)
-            add_log_entry("クイックツール起動: ブログリンク")
-    
-    with col3:
-        if st.button("Note紹介 [R]", key="skill_note", use_container_width=True):
-            st.code(quick_texts["Note紹介 [R]"], language=None)
-            add_log_entry("クイックツール起動: Note紹介")
-    
-    with col4:
-        if st.button("デプロイ [E]", key="skill_deploy", use_container_width=True, type="primary"):
-            st.code(quick_texts["デプロイ [E]"], language=None)
-            add_log_entry("クイックツール起動: デプロイ")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
     # メイングリッドレイアウト
     col1, col2 = st.columns([1, 2])
     
@@ -463,7 +425,7 @@ def show_dashboard():
         # Active Quests
         st.markdown("""
         <div class="section-title">
-            > アクティブクエスト_
+            > 未完了タスク_
         </div>
         """, unsafe_allow_html=True)
         
@@ -498,12 +460,6 @@ def show_dashboard():
                             tag_class = "tag-grinding"
                         
                         tag_text = category
-                        if category == "制作":
-                            tag_text = "Crafting"
-                        elif category == "開発":
-                            tag_text = "Dev"
-                        elif category == "学習":
-                            tag_text = "Grinding"
                         
                         st.markdown(f"""
                         <div class="task-item">
@@ -514,8 +470,8 @@ def show_dashboard():
                         if st.checkbox("", key=f"complete_{row_num}", label_visibility="collapsed"):
                             sheet.update_cell(row_num, 4, "済")
                             sheet.update_cell(row_num, 7, get_now_jst())
-                            add_log_entry(f"クエスト完了: {title[:30]}...")
-                            st.session_state.daily_exp = st.session_state.get('daily_exp', 150) + 50
+                            add_log_entry(f"タスク完了: {title[:30]}...")
+                            st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
                             st.rerun()
                         
                         st.markdown(f"""
@@ -538,7 +494,7 @@ def show_dashboard():
         # Campaign Map Status
         st.markdown("""
         <div class="section-title">
-            > キャンペーンマップステータス_
+            > プロジェクト一覧_
         </div>
         """, unsafe_allow_html=True)
         
@@ -625,7 +581,7 @@ def show_dashboard():
     # Save Point // System Log
     st.markdown("""
     <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
-        <span>> セーブポイント // システムログ_</span>
+        <span>> アクティビティログ_</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -636,14 +592,13 @@ def show_dashboard():
         log_html = '<div class="system-log">'
         for entry in log_entries[-10:]:  # 最新10件
             log_html += f'<p style="margin: 0.25rem 0;">{entry}</p>'
-        log_html += '<p style="margin: 0.25rem 0; animation: pulse 2s infinite;">> 入力待機中..._</p>'
         log_html += '</div>'
         st.markdown(log_html, unsafe_allow_html=True)
     
     with col2:
-        if st.button("レポート生成", use_container_width=True, type="primary"):
+        if st.button("Note生成", use_container_width=True, type="primary"):
             st.switch_page("pages/note_generator.py") if hasattr(st, 'switch_page') else None
-            add_log_entry("レポート生成を開始しました。")
+            add_log_entry("Note生成を開始しました。")
     
     # 新規タスク追加（折りたたみ可能）
     with st.expander("➕ 新規タスク追加", expanded=False):
@@ -677,7 +632,7 @@ def show_dashboard():
                             ""
                         ]
                         sheet.append_row(new_row)
-                        add_log_entry(f"新しいクエストを追加: {task_title}")
+                        add_log_entry(f"タスクを追加: {task_title}")
                         st.success(f"タスク「{task_title}」を追加しました！")
                         st.rerun()
                 else:
@@ -687,7 +642,7 @@ def show_dashboard():
 def show_projects():
     st.markdown("""
     <h1 style="color: #00FFFF; font-family: 'Courier New', monospace; text-transform: uppercase; letter-spacing: 0.2em;">
-        キャンペーンマップ
+        プロジェクト管理
     </h1>
     """, unsafe_allow_html=True)
     
@@ -727,7 +682,7 @@ def show_projects():
                         get_now_jst()
                     ]
                     sheet.append_row(new_row)
-                    add_log_entry(f"新しいキャンペーンを追加: {project_theme}")
+                    add_log_entry(f"プロジェクトを追加: {project_theme}")
                     st.success(f"プロジェクト「{project_theme}」を追加しました！")
                     st.rerun()
                 else:
@@ -781,7 +736,7 @@ def show_projects():
                     sheet.update_cell(i, 6, new_stamp_url)
                     sheet.update_cell(i, 7, new_status)
                     sheet.update_cell(i, 8, get_now_jst())
-                    add_log_entry(f"キャンペーンを更新: {new_theme}")
+                    add_log_entry(f"プロジェクトを更新: {new_theme}")
                     st.success("プロジェクトを更新しました！")
                     st.rerun()
     else:
@@ -791,7 +746,7 @@ def show_projects():
 def show_assets():
     st.markdown("""
     <h1 style="color: #00FFFF; font-family: 'Courier New', monospace; text-transform: uppercase; letter-spacing: 0.2em;">
-        インベントリ
+        資産・アイデア管理
     </h1>
     """, unsafe_allow_html=True)
     
@@ -891,7 +846,7 @@ def show_assets():
                                 get_now_jst()
                             ]
                             sheet.append_row(new_row)
-                            add_log_entry("新しいアイデアを記録しました。")
+                            add_log_entry("アイデアを追加しました。")
                             st.success("アイデアを追加しました！")
                             st.rerun()
                     else:
@@ -923,7 +878,7 @@ def show_assets():
 def show_note_generator():
     st.markdown("""
     <h1 style="color: #00FFFF; font-family: 'Courier New', monospace; text-transform: uppercase; letter-spacing: 0.2em;">
-        セーブポイント // Note生成
+        Note記事生成
     </h1>
     """, unsafe_allow_html=True)
     
@@ -946,7 +901,7 @@ def show_note_generator():
     
     st.markdown("""
     <div class="section-title">
-        > 差分抽出_
+        > 抽出結果_
     </div>
     """, unsafe_allow_html=True)
     
@@ -1065,7 +1020,7 @@ def show_note_generator():
                 if not found:
                     settings_sheet.append_row(["last_report_at", get_now_jst()])
             
-            add_log_entry("レポートを生成し、タイムスタンプを更新しました。")
+            add_log_entry("Note記事を生成しました。")
             st.subheader("📋 コピー用テキスト")
             st.code(edited_text, language=None)
             st.success("✅ レポート出力日時を更新しました！上記のテキストをコピーしてNoteに投稿してください。")
@@ -1094,7 +1049,7 @@ def main():
     st.sidebar.markdown("""
     <div style="text-align: center; padding: 1rem 0; border-bottom: 1px solid rgba(0, 255, 255, 0.3);">
         <h1 style="color: #00FFFF; font-family: 'Courier New', monospace; font-size: 1.5rem; margin: 0; text-transform: uppercase; letter-spacing: 0.2em;">
-            クリエイターズ<br>コックピット
+            Creator's<br>Cockpit
         </h1>
     </div>
     """, unsafe_allow_html=True)
@@ -1103,7 +1058,7 @@ def main():
     
     page = st.sidebar.radio(
         "ナビゲーション",
-        ["📊 ダッシュボード", "📁 キャンペーンマップ", "💡 インベントリ", "📝 セーブポイント"],
+        ["📊 ダッシュボード", "📁 プロジェクト管理", "💡 資産・アイデア", "📝 Note生成"],
         label_visibility="visible"
     )
     
@@ -1113,11 +1068,11 @@ def main():
     # ページに応じた処理
     if page == "📊 ダッシュボード":
         show_dashboard()
-    elif page == "📁 キャンペーンマップ":
+    elif page == "📁 プロジェクト管理":
         show_projects()
-    elif page == "💡 インベントリ":
+    elif page == "💡 資産・アイデア":
         show_assets()
-    elif page == "📝 セーブポイント":
+    elif page == "📝 Note生成":
         show_note_generator()
 
 if __name__ == "__main__":
