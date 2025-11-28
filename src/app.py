@@ -601,35 +601,132 @@ def add_log(message):
     st.session_state.system_log.append(f"[{time_str}] {message}")
     st.session_state.system_log = st.session_state.system_log[-20:]
 
+def parse_links(text):
+    """リンクテキストからURLとラベルのペアを抽出する
+    戻り値: [(label, url), ...] のリスト
+    """
+    if not text:
+        return []
+    
+    links = []
+    lines = text.split('\n')
+    url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+    markdown_link_pattern = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Markdown形式のリンクをチェック [ラベル](URL)
+        markdown_match = markdown_link_pattern.search(line)
+        if markdown_match:
+            label = markdown_match.group(1)
+            url = markdown_match.group(2)
+            links.append((label, url))
+        else:
+            # 通常のURLを検索
+            urls = url_pattern.findall(line)
+            if urls:
+                url = urls[0]
+                # URLを除去した部分からラベルを抽出
+                remaining = line.replace(url, '').strip()
+                
+                # 形式1: "ラベル: URL" または "ラベル : URL"
+                if ':' in remaining:
+                    label = remaining.split(':')[0].strip()
+                # 形式2: "URL ラベル" または "URL (ラベル)"
+                elif remaining.startswith('(') and remaining.endswith(')'):
+                    label = remaining[1:-1].strip()
+                elif remaining:
+                    # URLの後に続くテキストをラベルとして使用
+                    label = remaining.strip()
+                else:
+                    label = ""
+                
+                links.append((label, url))
+    
+    return links
+
+def format_links(links):
+    """リンクのリストを保存用のテキスト形式に変換する
+    引数: [(label, url), ...] のリスト
+    戻り値: 保存用のテキスト文字列
+    """
+    if not links:
+        return ""
+    
+    formatted = []
+    for label, url in links:
+        if label and label.strip():
+            formatted.append(f"{label.strip()}: {url}")
+        else:
+            formatted.append(url)
+    
+    return "\n".join(formatted)
+
 def extract_urls_as_html(text):
-    """テキスト内のURLをHTMLリンクに変換して返す"""
+    """テキスト内のURLをHTMLリンクに変換して返す
+    形式: 
+    - ラベル: https://example.com
+    - https://example.com ラベル
+    - https://example.com (ラベル)
+    - [ラベル](https://example.com) (Markdown形式)
+    """
     if not text:
         return ""
     lines = text.split('\n')
     links_html = []
     url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+    markdown_link_pattern = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
     
     for line in lines:
-        urls = url_pattern.findall(line)
-        if urls:
-            url = urls[0]
-            # ラベル生成 (URLを除去した部分)
-            label = line.replace(url, '').strip().strip(':').strip()
-            if not label:
-                label = "Link"
+        line = line.strip()
+        if not line:
+            continue
             
-            link_html = f"""
-            <a href="{url}" target="_blank" style="
-                color: {COLORS['accent_cyan']};
-                text-decoration: none;
-                margin-right: 10px;
-                border: 1px solid rgba(0,255,255,0.3);
-                padding: 2px 6px;
-                border-radius: 3px;
-                font-size: 0.8rem;
-            ">🔗 {label}</a>
-            """
-            links_html.append(link_html)
+        # Markdown形式のリンクをチェック [ラベル](URL)
+        markdown_match = markdown_link_pattern.search(line)
+        if markdown_match:
+            label = markdown_match.group(1)
+            url = markdown_match.group(2)
+        else:
+            # 通常のURLを検索
+            urls = url_pattern.findall(line)
+            if urls:
+                url = urls[0]
+                # URLを除去した部分からラベルを抽出
+                remaining = line.replace(url, '').strip()
+                
+                # 形式1: "ラベル: URL" または "ラベル : URL"
+                if ':' in remaining:
+                    label = remaining.split(':')[0].strip()
+                # 形式2: "URL ラベル" または "URL (ラベル)"
+                elif remaining.startswith('(') and remaining.endswith(')'):
+                    label = remaining[1:-1].strip()
+                elif remaining:
+                    # URLの後に続くテキストをラベルとして使用
+                    label = remaining.strip()
+                else:
+                    label = "Link"
+            else:
+                continue
+        
+        if not label:
+            label = "Link"
+        
+        link_html = f"""
+        <a href="{url}" target="_blank" style="
+            color: {COLORS['accent_cyan']};
+            text-decoration: none;
+            margin-right: 10px;
+            border: 1px solid rgba(0,255,255,0.3);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+        ">🔗 {label}</a>
+        """
+        links_html.append(link_html)
             
     return "".join(links_html)
 
@@ -972,13 +1069,52 @@ def render_project_manager(manager):
             with c_view:
                 st.caption("📝 詳細情報")
                 # リンク編集とメモ編集
-                new_links = st.text_area("関連リンク (URL)", value=proj.get('links', ''), height=80, key=f"lk_{proj['id']}")
+                st.markdown("**関連リンク**")
+                
+                # リンクデータの初期化
+                links_key = f"project_links_{proj['id']}"
+                if links_key not in st.session_state:
+                    # 既存のリンクをパース
+                    existing_links = parse_links(proj.get('links', ''))
+                    if not existing_links:
+                        existing_links = [("", "")]
+                    st.session_state[links_key] = existing_links
+                
+                # リンク入力項目
+                links_to_remove = []
+                for idx, (label, url) in enumerate(st.session_state[links_key]):
+                    col1, col2, col3 = st.columns([3, 3, 1])
+                    with col1:
+                        new_label = st.text_input("ラベル", value=label, key=f"link_label_{proj['id']}_{idx}", placeholder="例: Note記事")
+                    with col2:
+                        new_url = st.text_input("URL", value=url, key=f"link_url_{proj['id']}_{idx}", placeholder="https://example.com")
+                    with col3:
+                        if st.button("削除", key=f"link_del_{proj['id']}_{idx}"):
+                            links_to_remove.append(idx)
+                    
+                    # 値を更新
+                    if idx < len(st.session_state[links_key]):
+                        st.session_state[links_key][idx] = (new_label, new_url)
+                
+                # 削除処理
+                for idx in sorted(links_to_remove, reverse=True):
+                    if idx < len(st.session_state[links_key]):
+                        st.session_state[links_key].pop(idx)
+                        st.rerun()
+                
+                # リンク追加ボタン
+                if st.button("➕ リンクを追加", key=f"link_add_{proj['id']}"):
+                    st.session_state[links_key].append(("", ""))
+                    st.rerun()
+                
                 new_memo = st.text_area("メモ", value=proj.get('memo', ''), height=80, key=f"mm_{proj['id']}")
                 
                 # ここだけ個別保存ボタン（誤操作防止のため）
                 if st.button("詳細を保存", key=f"det_{proj['id']}"):
                     old_memo = proj.get('memo', '')
-                    manager.update_cell_by_id("projects", proj['id'], "links", new_links)
+                    # リンクをフォーマットして保存
+                    formatted_links = format_links(st.session_state[links_key])
+                    manager.update_cell_by_id("projects", proj['id'], "links", formatted_links)
                     manager.update_cell_by_id("projects", proj['id'], "memo", new_memo)
                     # メモが変更された場合、memo_updated_atを更新し、履歴に記録
                     if new_memo != old_memo:
@@ -1004,39 +1140,78 @@ def render_project_manager(manager):
 
     st.markdown("---")
     with st.expander("➕ 新規プロジェクト立ち上げ", expanded=False):
-        with st.form("new_proj_form"):
-            st.subheader("New Project")
-            f_theme = st.text_input("プロジェクトテーマ (必須)")
-            f_links = st.text_area("関連URL", placeholder="Note: https://...")
-            f_memo = st.text_area("メモ")
-            
-            if st.form_submit_button("作成する"):
-                if f_theme:
-                    new_id = manager.get_next_id("projects")
-                    now_str = get_now_jst()
-                    # id, theme, status, links, memo, updated_at, memo_updated_at
-                    # メモが入力されている場合、memo_updated_atも設定し、履歴に記録
-                    memo_updated_at = now_str if f_memo.strip() else ""
-                    manager.add_row("projects", [new_id, f_theme, "進行中", f_links, f_memo, now_str, memo_updated_at])
-                    # 活動履歴に記録
-                    manager.add_activity_history(
-                        action_type="プロジェクト作成",
-                        entity_type="projects",
-                        entity_id=new_id,
-                        entity_name=f_theme,
-                        old_value="",
-                        new_value="進行中",
-                        details=f"メモ: {f_memo}" if f_memo.strip() else ""
-                    )
-                    # メモが入力されている場合、コメント履歴にも記録
-                    if f_memo.strip():
-                        manager.add_comment_history(new_id, f_theme, f_memo, now_str)
-                        add_log(f"新規プロジェクトコメント履歴記録: {f_theme}")
-                    st.success(f"プロジェクト「{f_theme}」を作成しました")
-                    time.sleep(0.5)
-                    st.rerun()
+        # 新規プロジェクト用のリンクデータの初期化
+        if 'new_project_links' not in st.session_state:
+            st.session_state.new_project_links = [("", "")]
+        
+        st.subheader("New Project")
+        f_theme = st.text_input("プロジェクトテーマ (必須)", key="new_proj_theme")
+        st.markdown("**関連リンク**")
+        
+        # リンク入力項目
+        links_to_remove = []
+        for idx, (label, url) in enumerate(st.session_state.new_project_links):
+            col1, col2, col3 = st.columns([3, 3, 1])
+            with col1:
+                new_label = st.text_input("ラベル", value=label, key=f"new_link_label_{idx}", placeholder="例: Note記事")
+            with col2:
+                new_url = st.text_input("URL", value=url, key=f"new_link_url_{idx}", placeholder="https://example.com")
+            with col3:
+                if len(st.session_state.new_project_links) > 1:
+                    if st.button("削除", key=f"new_link_del_{idx}"):
+                        links_to_remove.append(idx)
                 else:
-                    st.error("テーマ名は必須です")
+                    st.write("")  # スペーサー
+            
+            # 値を更新
+            if idx < len(st.session_state.new_project_links):
+                st.session_state.new_project_links[idx] = (new_label, new_url)
+        
+        # 削除処理
+        if links_to_remove:
+            for idx in sorted(links_to_remove, reverse=True):
+                if idx < len(st.session_state.new_project_links):
+                    st.session_state.new_project_links.pop(idx)
+            st.rerun()
+        
+        # リンク追加ボタン
+        if st.button("➕ リンクを追加", key="new_link_add"):
+            st.session_state.new_project_links.append(("", ""))
+            st.rerun()
+        
+        f_memo = st.text_area("メモ", key="new_proj_memo")
+        
+        if st.button("作成する", type="primary", use_container_width=True, key="new_proj_submit"):
+            if f_theme:
+                new_id = manager.get_next_id("projects")
+                now_str = get_now_jst()
+                # リンクをフォーマットして保存
+                f_links = format_links(st.session_state.new_project_links)
+                # id, theme, status, links, memo, updated_at, memo_updated_at
+                # メモが入力されている場合、memo_updated_atも設定し、履歴に記録
+                memo_updated_at = now_str if f_memo.strip() else ""
+                manager.add_row("projects", [new_id, f_theme, "進行中", f_links, f_memo, now_str, memo_updated_at])
+                # リンクデータをリセット
+                st.session_state.new_project_links = [("", "")]
+                # 活動履歴に記録
+                manager.add_activity_history(
+                    action_type="プロジェクト作成",
+                    entity_type="projects",
+                    entity_id=new_id,
+                    entity_name=f_theme,
+                    old_value="",
+                    new_value="進行中",
+                    details=f"メモ: {f_memo}" if f_memo.strip() else ""
+                )
+                # メモが入力されている場合、コメント履歴にも記録
+                if f_memo.strip():
+                    manager.add_comment_history(new_id, f_theme, f_memo, now_str)
+                    add_log(f"新規プロジェクトコメント履歴記録: {f_theme}")
+                st.success(f"プロジェクト「{f_theme}」を作成しました")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error("テーマ名は必須です")
 
 
 def render_report_generator(manager):
