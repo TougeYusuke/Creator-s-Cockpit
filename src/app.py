@@ -290,6 +290,20 @@ class SheetManager:
         ids = [int(r['id']) for r in records if str(r['id']).isdigit()]
         return max(ids) + 1 if ids else 1
 
+    def delete_row_by_id(self, sheet_name, id_val):
+        """id列（1列目）で行を特定して削除する"""
+        try:
+            sheet = self.spreadsheet.worksheet(sheet_name)
+            cell = sheet.find(str(id_val), in_column=1)
+            if cell:
+                sheet.delete_rows(cell.row)
+                self.clear_cache()
+                return True
+            return False
+        except Exception as e:
+            st.error(f"削除エラー: {e}")
+            return False
+
 @st.cache_resource
 def get_sheet_manager():
     return SheetManager()
@@ -708,17 +722,52 @@ def render_assets_and_ideas(manager):
 
         # 1行目をヘッダーとして解釈し、2行目以降をデータとして扱う
         if not values or len(values) <= 1:
-            st.info("まだアイデアが登録されていません。ダッシュボード上部の「新しいアイデアを追加する」ボタンから登録できます。")
+            st.info("まだアイデアが登録されていません。右上のボタンやダッシュボードから登録できます。")
         else:
             headers = values[0]
             rows = values[1:]
             df_ideas = pd.DataFrame(rows, columns=headers)
 
             # 期待するカラム名を揃える（ユーザー要望: id, content, created_at）
-            # もし古いカラム名(title等)が残っていても、できるだけ content に寄せる
-            if "content" not in df_ideas.columns:
-                if "title" in df_ideas.columns:
-                    df_ideas.rename(columns={"title": "content"}, inplace=True)
+            if "content" not in df_ideas.columns and "title" in df_ideas.columns:
+                df_ideas.rename(columns={"title": "content"}, inplace=True)
+
+            # --- 一覧表示をメインに ---
+            # フォーム開閉フラグの初期化
+            if "show_assets_idea_form" not in st.session_state:
+                st.session_state["show_assets_idea_form"] = False
+
+            top_cols = st.columns([3, 1])
+            with top_cols[0]:
+                st.subheader("💡 ストックされたアイデア一覧")
+            with top_cols[1]:
+                # 現在の状態に応じてラベルを決定
+                current = st.session_state["show_assets_idea_form"]
+                btn_label = "➕ アイデアを登録" if not current else "✖️ 閉じる"
+                if st.button(btn_label, key="toggle_assets_idea_form"):
+                    # 状態を反転させて即座に再実行（ラベルとフォーム表示を同期させる）
+                    st.session_state["show_assets_idea_form"] = not current
+                    st.rerun()
+
+            # --- 一覧の下に、ボタンで開閉する登録フォーム ---
+            if st.session_state.get("show_assets_idea_form", False):
+                st.subheader("✏️ 新規アイデア登録")
+                with st.form("idea_add_from_assets"):
+                    new_content = st.text_area("アイデア内容 (必須)", height=4)
+                    submitted_new = st.form_submit_button("このアイデアを登録する", use_container_width=True)
+                    if submitted_new:
+                        if new_content:
+                            new_id = manager.get_next_id("ideas")
+                            ok = manager.add_row("ideas", [new_id, new_content, get_now_jst()])
+                            if ok:
+                                add_log(f"新規アイデア追加(ASSETS): {new_content[:20]}...")
+                                st.success("アイデアを登録しました！")
+                                st.session_state["show_assets_idea_form"] = False
+                                time.sleep(0.5)
+                                st.rerun()
+                        else:
+                            st.error("アイデア内容を入力してください。")
+                st.markdown("---")
 
             # フィルタUI
             keyword = st.text_input("キーワードで絞り込み", placeholder="アイデア内容から検索")
@@ -736,14 +785,29 @@ def render_assets_and_ideas(manager):
                 except Exception:
                     pass
 
-            # 表示用の列順を調整（id, content, created_at）
-            display_cols = [c for c in ["id", "content", "created_at"] if c in df_ideas.columns]
-            st.subheader("💡 ストックされたアイデア")
-            if display_cols:
-                st.dataframe(df_ideas[display_cols], use_container_width=True, hide_index=True)
+            # 行ごとに削除ボタン付きで表示
+            if df_ideas.empty:
+                st.info("該当するアイデアがありません。")
             else:
-                # 想定外のカラム構成でも、とりあえず全列を表示
-                st.dataframe(df_ideas, use_container_width=True, hide_index=True)
+                for _, row in df_ideas.iterrows():
+                    idea_id = row.get("id", "")
+                    content = row.get("content", "")
+                    created = row.get("created_at", "")
+
+                    cols = st.columns([6, 2, 1])
+                    with cols[0]:
+                        st.markdown(f"**#{idea_id}**  {content}")
+                        if created:
+                            st.caption(f"登録日時: {created}")
+                    with cols[2]:
+                        if st.button("削除", key=f"idea_del_{idea_id}"):
+                            if idea_id:
+                                ok = manager.delete_row_by_id("ideas", idea_id)
+                                if ok:
+                                    add_log(f"アイデア削除: id={idea_id}")
+                                    st.success("アイデアを削除しました。")
+                                    time.sleep(0.3)
+                                    st.rerun()
 
     # --- その他の資産タブ（将来拡張用） ---
     with tab_assets:
