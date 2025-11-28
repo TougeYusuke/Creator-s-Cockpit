@@ -797,15 +797,19 @@ def render_dashboard(manager):
                 st.rerun()
 
         # 新規タスク追加フォーム
+        # フォームリセット用のキーを管理
+        if 'task_form_key' not in st.session_state:
+            st.session_state.task_form_key = 0
+        
         with st.expander("➕ 新しいクエストを受注する", expanded=False):
-            with st.form("add_task_form"):
+            with st.form(f"add_task_form_{st.session_state.task_form_key}"):
                 c_title, c_cat = st.columns([3, 1])
                 with c_title:
-                    new_title = st.text_input("クエスト名 (必須)")
+                    new_title = st.text_input("クエスト名 (必須)", key=f"task_title_{st.session_state.task_form_key}")
                 with c_cat:
-                    new_cat = st.selectbox("カテゴリ", list(CATEGORY_ICONS.keys()))
+                    new_cat = st.selectbox("カテゴリ", list(CATEGORY_ICONS.keys()), key=f"task_cat_{st.session_state.task_form_key}")
                 
-                new_memo = st.text_area("メモ (任意)", height=3)
+                new_memo = st.text_area("メモ (任意)", height=3, key=f"task_memo_{st.session_state.task_form_key}")
                 
                 if st.form_submit_button("登録する", use_container_width=True):
                     if new_title:
@@ -823,6 +827,8 @@ def render_dashboard(manager):
                             details=f"カテゴリ: {new_cat}" + (f", メモ: {new_memo}" if new_memo else "")
                         )
                         add_log(f"新規クエスト追加: {new_title}")
+                        # フォームをリセットするためにキーを変更
+                        st.session_state.task_form_key += 1
                         st.success("登録しました")
                         time.sleep(0.5)
                         st.rerun()
