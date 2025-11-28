@@ -597,8 +597,9 @@ def show_dashboard():
     
     with col2:
         if st.button("Note生成", use_container_width=True, type="primary"):
-            st.switch_page("pages/note_generator.py") if hasattr(st, 'switch_page') else None
+            st.session_state.page = "📝 Note生成"
             add_log_entry("Note生成を開始しました。")
+            st.rerun()
     
     # 新規タスク追加（折りたたみ可能）
     with st.expander("➕ 新規タスク追加", expanded=False):
@@ -1056,11 +1057,19 @@ def main():
     
     st.sidebar.markdown("<br>", unsafe_allow_html=True)
     
+    # セッション状態からページを取得、なければデフォルト
+    default_page = st.session_state.get('page', "📊 ダッシュボード")
+    
     page = st.sidebar.radio(
         "ナビゲーション",
         ["📊 ダッシュボード", "📁 プロジェクト管理", "💡 資産・アイデア", "📝 Note生成"],
+        index=["📊 ダッシュボード", "📁 プロジェクト管理", "💡 資産・アイデア", "📝 Note生成"].index(default_page) if default_page in ["📊 ダッシュボード", "📁 プロジェクト管理", "💡 資産・アイデア", "📝 Note生成"] else 0,
         label_visibility="visible"
     )
+    
+    # ページが変更されたらセッション状態を更新
+    if page != st.session_state.get('page', None):
+        st.session_state.page = page
     
     st.sidebar.markdown("---")
     st.sidebar.caption(f"最終更新: {get_now_jst()}")
