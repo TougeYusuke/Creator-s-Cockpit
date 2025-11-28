@@ -568,12 +568,12 @@ def render_project_manager(manager):
     if not projects:
         st.warning("データがありません")
         
-    # アコーディオンで一覧表示
+    # アコーディオンで一覧表示（デフォルトはすべて閉じる）
     for proj in projects:
         status = proj.get('status', '進行中')
         icon = "🔹" if status == '進行中' else "✅" if status == '完了' else "💤"
         
-        with st.expander(f"{icon} {proj.get('theme')}", expanded=(status=='進行中')):
+        with st.expander(f"{icon} {proj.get('theme')}", expanded=False):
             c_edit, c_view = st.columns([1, 1])
             
             # 編集エリア
