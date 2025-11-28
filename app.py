@@ -110,7 +110,7 @@ def inject_custom_css():
        無理な改行強制(block化)を廃止し、Flexboxで自然に左寄せします
     ----------------------------------------------------------------- */
     
-    /* ボタンコンテナ全体 */
+    /* ボタンコンテナ全体（メインエリア） */
     div[data-testid="stButton"] > button {{
         width: 100% !important;
         height: auto !important;
@@ -128,6 +128,18 @@ def inject_custom_css():
         
         transition: all 0.2s;
         font-family: 'Courier New', monospace !important;
+    }}
+
+    /* サイドバー内のボタンは控えめなスタイルに */
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {{
+        width: 100% !important;
+        padding: 4px 8px !important;
+        font-size: 0.75rem !important;
+        background: transparent !important;
+        border: 1px solid rgba(0, 255, 255, 0.3) !important;
+        border-left-width: 1px !important;
+        box-shadow: none !important;
+        transform: none !important;
     }}
 
     /* ボタン内のテキスト要素 */
@@ -253,6 +265,13 @@ class SheetManager:
         ids = [int(r['id']) for r in records if str(r['id']).isdigit()]
         return max(ids) + 1 if ids else 1
 
+
+# SheetManager インスタンス自体をセッション単位でキャッシュして、
+# 毎回の rerun での認証・スプレッドシート接続コストを削減する
+@st.cache_resource
+def get_sheet_manager():
+    return SheetManager()
+
 # ==========================================
 # 4. ヘルパー関数
 # ==========================================
@@ -294,6 +313,12 @@ def render_warp_gate(manager):
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🌌 ワープゲート (リンク集)")
     
+    # セッション開始直後（F5 などで新しく開かれたとき）は
+    # 「すべて閉じた状態」からスタートさせる
+    if 'warp_gate_ver' not in st.session_state:
+        st.session_state['warp_gate_ver'] = 1
+        st.session_state['warp_gate_collapse_now'] = True
+    
     shortcuts = manager.get_records("shortcuts")
     
     if not shortcuts:
@@ -302,9 +327,16 @@ def render_warp_gate(manager):
 
     df = pd.DataFrame(shortcuts)
     if 'category' in df.columns:
+        # 直近で「すべて閉じる」が押された場合のみ、この1回の実行でだけ closed をデフォルトにする
+        collapse_flag = st.session_state.pop('warp_gate_collapse_now', False)
+        expanded_default = not collapse_flag
+        ver = st.session_state.get('warp_gate_ver', 0)
+
         categories = df['category'].unique()
         for cat in categories:
-            with st.sidebar.expander(f"📂 {cat}", expanded=True):
+            # ウィジェットID用にゼロ幅スペースを付与（表示は変わらない）
+            label = f"📂 {cat}" + ("\u200b" * ver)
+            with st.sidebar.expander(label, expanded=expanded_default):
                 cat_items = df[df['category'] == cat]
                 for _, item in cat_items.iterrows():
                     icon = item.get('icon', '🔗')
@@ -550,7 +582,8 @@ def render_note_generator(manager):
 # ==========================================
 def main():
     inject_custom_css()
-    manager = SheetManager()
+    # 毎回インスタンスを作らず、キャッシュされたマネージャーを利用
+    manager = get_sheet_manager()
     
     with st.sidebar:
         st.title("ナビゲーション")
