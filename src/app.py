@@ -785,18 +785,18 @@ def render_assets_and_ideas(manager):
                 except Exception:
                     pass
 
-            # 行ごとに削除ボタン付きで表示
+            # 行ごとに削除ボタン付きで表示（IDは内部用としてのみ使用）
             if df_ideas.empty:
                 st.info("該当するアイデアがありません。")
             else:
-                for _, row in df_ideas.iterrows():
+                for idx, row in df_ideas.iterrows():
                     idea_id = row.get("id", "")
                     content = row.get("content", "")
                     created = row.get("created_at", "")
 
                     cols = st.columns([6, 2, 1])
                     with cols[0]:
-                        st.markdown(f"**#{idea_id}**  {content}")
+                        st.markdown(f"{content}")
                         if created:
                             st.caption(f"登録日時: {created}")
                     with cols[2]:
@@ -808,6 +808,10 @@ def render_assets_and_ideas(manager):
                                     st.success("アイデアを削除しました。")
                                     time.sleep(0.3)
                                     st.rerun()
+
+                    # 各アイテムの上に区切り線を表示（先頭要素は除く）
+                    if idx != 0:
+                        st.markdown("---")
 
     # --- その他の資産タブ（将来拡張用） ---
     with tab_assets:
