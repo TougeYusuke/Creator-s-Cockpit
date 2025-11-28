@@ -523,9 +523,9 @@ def render_dashboard(manager):
         st.subheader("📊 プロジェクト戦況")
         
         projects = manager.get_records("projects")
-        # 進行中のものを優先表示
+        # 進行中のものを優先表示（完了プロジェクトは非表示）
         active_projects = [p for p in projects if p.get('status') == '進行中']
-        other_projects = [p for p in projects if p.get('status') != '進行中']
+        other_projects = [p for p in projects if p.get('status') != '進行中' and p.get('status') != '完了']
         
         display_list = active_projects + other_projects
         
@@ -586,6 +586,18 @@ def render_project_manager(manager):
     projects = manager.get_records("projects")
     if not projects:
         st.warning("データがありません")
+        return
+    
+    # 完了プロジェクト表示のチェックボックス
+    show_completed = st.checkbox("完了したプロジェクトを表示", value=False, key="show_completed_projects")
+    
+    # 完了プロジェクトをフィルタリング
+    if not show_completed:
+        projects = [p for p in projects if p.get('status', '進行中') != '完了']
+    
+    if not projects:
+        st.info("表示するプロジェクトがありません。")
+        return
         
     # アコーディオンで一覧表示（デフォルトはすべて閉じる）
     for proj in projects:
