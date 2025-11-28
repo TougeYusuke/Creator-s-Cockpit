@@ -201,6 +201,230 @@ def inject_custom_css():
     </style>
     """, unsafe_allow_html=True)
 
+def inject_warpgate_scroll_script():
+    """ワープゲートexpanderが開かれたときに自動スクロールするJavaScriptを注入"""
+    try:
+        import streamlit.components.v1 as components
+        
+        # st.components.v1.htmlを使って確実に実行されるようにする
+        # 親ウィンドウのDOMにアクセスするため、window.parentを使用
+        components.html("""
+    <script>
+    (function() {
+        try {
+            // 親ウィンドウのDOMにアクセス（iframe内で実行される場合）
+            let targetWindow, targetDoc;
+            try {
+                targetWindow = window.parent !== window ? window.parent : window;
+                targetDoc = targetWindow.document;
+            } catch (e) {
+                targetWindow = window;
+                targetDoc = document;
+            }
+        
+        function initScrollHandler() {
+            // サイドバーが存在するか確認
+            const sidebar = targetDoc.querySelector('[data-testid="stSidebar"]');
+            
+            if (!sidebar) {
+                return false;
+            }
+            
+            function findScrollableElement(element) {
+                let current = element;
+                while (current && current !== targetDoc.body) {
+                    const style = targetWindow.getComputedStyle(current);
+                    if (style.overflowY === 'auto' || style.overflowY === 'scroll' || 
+                        style.overflow === 'auto' || style.overflow === 'scroll') {
+                        return current;
+                    }
+                    current = current.parentElement;
+                }
+                return null;
+            }
+            
+            function scrollToElement(element) {
+                const scrollable = findScrollableElement(element) || sidebar;
+                
+                // scrollIntoViewを使う方法（より確実）
+                try {
+                    element.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start',
+                        inline: 'nearest'
+                    });
+                } catch (e) {
+                    // フォールバック: 手動でスクロール位置を計算
+                    const rect = element.getBoundingClientRect();
+                    const scrollableRect = scrollable.getBoundingClientRect();
+                    const targetScroll = scrollable.scrollTop + (rect.top - scrollableRect.top) - 20;
+                    scrollable.scrollTo({
+                        top: targetScroll,
+                        behavior: 'smooth'
+                    });
+                }
+            }
+            
+            // 既に監視が設定されているexpanderを追跡
+            const observedExpanders = new WeakSet();
+            
+            // expanderに監視を設定する関数（クリックイベントとMutationObserverの両方を使用）
+            function setupExpanderObserver(expander) {
+                // 既に監視済みの場合はスキップ
+                if (observedExpanders.has(expander)) {
+                    return;
+                }
+                
+                // クリックイベントを監視（より確実）
+                const header = expander.querySelector('summary') || expander.querySelector('[role="button"]') || expander;
+                header.addEventListener('click', function(e) {
+                    // クリック前の高さを記録
+                    const initialHeight = expander.offsetHeight;
+                    
+                    // 定期的に状態をチェックして、開いたときにスクロール
+                    let checkCount = 0;
+                    const maxChecks = 30; // 最大30回チェック（3秒間）
+                    const checkInterval = setInterval(function() {
+                        checkCount++;
+                        const currentHeight = expander.offsetHeight;
+                        // 高さが初期高さから50px以上増加した場合、開いていると判断
+                        const isExpanded = currentHeight > initialHeight + 50;
+                        
+                        // 高さが大幅に増加した場合（開いた場合）
+                        if (isExpanded) {
+                            clearInterval(checkInterval);
+                            // アニメーション完了を待つ
+                            setTimeout(function() {
+                                scrollToElement(expander);
+                            }, 500);
+                        } else if (checkCount >= maxChecks) {
+                            // 最大チェック回数に達したら停止
+                            clearInterval(checkInterval);
+                        }
+                    }, 100); // 100msごとにチェック
+                }, true);
+                
+                // MutationObserverも設定（バックアップ）
+                const observer = new MutationObserver(function(mutations) {
+                    mutations.forEach(function(mutation) {
+                        if (mutation.type === 'attributes' && mutation.attributeName === 'aria-expanded') {
+                            const isExpanded = expander.getAttribute('aria-expanded') === 'true';
+                            
+                            if (isExpanded) {
+                                // アニメーション完了を待つ
+                                setTimeout(function() {
+                                    scrollToElement(expander);
+                                }, 400);
+                            }
+                        }
+                    });
+                });
+                
+                observer.observe(expander, {
+                    attributes: true,
+                    attributeFilter: ['aria-expanded'],
+                    attributeOldValue: true
+                });
+                
+                // 監視済みとしてマーク
+                observedExpanders.add(expander);
+            }
+            
+            // expanderが存在するか確認
+            const expanders = sidebar.querySelectorAll('[data-testid="stExpander"]');
+            
+            // 各expanderにaria-expanded属性の変化を監視するMutationObserverを設定
+            expanders.forEach(function(expander) {
+                setupExpanderObserver(expander);
+            });
+            
+            // サイドバー全体にクリックイベントリスナーを設定（イベント委譲）
+            // 注意: このリスナーは各expanderの個別リスナーと重複する可能性があるため、
+            // 個別リスナーで処理される場合はここでは処理しない
+            sidebar.addEventListener('click', function(e) {
+                // クリックされた要素がexpanderか確認
+                const clickedExpander = e.target.closest('[data-testid="stExpander"]');
+                if (clickedExpander) {
+                    // クリック前の高さを記録
+                    const initialHeight = clickedExpander.offsetHeight;
+                    
+                    // 定期的に状態をチェックして、開いたときにスクロール
+                    let checkCount = 0;
+                    const maxChecks = 30; // 最大30回チェック（3秒間）
+                    const checkInterval = setInterval(function() {
+                        checkCount++;
+                        const currentHeight = clickedExpander.offsetHeight;
+                        // 高さが初期高さから50px以上増加した場合、開いていると判断
+                        const isExpanded = currentHeight > initialHeight + 50;
+                        
+                        // 高さが大幅に増加した場合（開いた場合）
+                        if (isExpanded) {
+                            clearInterval(checkInterval);
+                            // アニメーション完了を待つ
+                            setTimeout(function() {
+                                scrollToElement(clickedExpander);
+                            }, 500);
+                        } else if (checkCount >= maxChecks) {
+                            // 最大チェック回数に達したら停止
+                            clearInterval(checkInterval);
+                        }
+                    }, 100); // 100msごとにチェック
+                }
+            }, true);
+            
+            // サイドバーの内容変更を監視して、新しいexpanderが追加されたときに監視を設定
+            const sidebarObserver = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    Array.from(mutation.addedNodes).forEach(function(node) {
+                        if (node.nodeType === 1) { // Element node
+                            let newExpanders = [];
+                            if (node.querySelectorAll) {
+                                newExpanders = Array.from(node.querySelectorAll('[data-testid="stExpander"]'));
+                            }
+                            if (node.getAttribute && node.getAttribute('data-testid') === 'stExpander') {
+                                newExpanders.push(node);
+                            }
+                            newExpanders.forEach(function(expander) {
+                                setupExpanderObserver(expander);
+                            });
+                        }
+                    });
+                });
+            });
+            
+            sidebarObserver.observe(sidebar, {
+                childList: true,
+                subtree: true
+            });
+            
+            return true;
+        }
+        
+            // 即座に初期化を試みる
+            try {
+                if (!initScrollHandler()) {
+                    // サイドバーが見つからない場合、少し待ってから再試行
+                    setTimeout(function() {
+                        try {
+                            initScrollHandler();
+                        } catch (e) {
+                            // エラーは無視
+                        }
+                    }, 1000);
+                }
+            } catch (e) {
+                // エラーは無視
+            }
+        } catch (e) {
+            // エラーは無視
+        }
+    })();
+    </script>
+    """, height=0)
+    except Exception as e:
+        # エラーは無視
+        pass
+
 # ==========================================
 # 3. データ管理クラス (SheetManager)
 # ==========================================
@@ -853,6 +1077,7 @@ def render_assets_and_ideas(manager):
 # ==========================================
 def main():
     inject_custom_css()
+    inject_warpgate_scroll_script()
     manager = get_sheet_manager()
     
     # サイドバーナビゲーション
