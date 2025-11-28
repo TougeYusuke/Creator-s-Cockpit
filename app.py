@@ -298,6 +298,24 @@ def inject_custom_css():
     [data-testid="stMetricLabel"] {
         color: #9ca3af;
     }
+    
+    /* 空のカラムやコンテナを非表示 */
+    [data-testid="column"]:empty,
+    [data-testid="stVerticalBlock"]:empty {
+        display: none;
+    }
+    
+    /* 空の要素を非表示 */
+    .element-container:empty,
+    .stMarkdown:empty {
+        display: none;
+    }
+    
+    /* カラムの最小高さを調整 */
+    [data-testid="column"] {
+        min-height: auto;
+    }
+    
     </style>
     """, unsafe_allow_html=True)
 
@@ -427,6 +445,45 @@ def add_log_entry(message):
 
 # ダッシュボード画面
 def show_dashboard():
+    # 空の入力フィールドを非表示にするJavaScript
+    st.markdown("""
+    <script>
+    (function() {
+        function hideEmptyInputs() {
+            const textInputs = document.querySelectorAll('.stTextInput');
+            const textAreas = document.querySelectorAll('.stTextArea');
+            
+            textInputs.forEach(input => {
+                const label = input.querySelector('label');
+                const inputField = input.querySelector('input');
+                if (!label && inputField && !inputField.value && !inputField.placeholder) {
+                    const container = input.closest('.element-container');
+                    if (container) container.style.display = 'none';
+                }
+            });
+            
+            textAreas.forEach(textarea => {
+                const label = textarea.querySelector('label');
+                const textareaField = textarea.querySelector('textarea');
+                if (!label && textareaField && !textareaField.value && !textareaField.placeholder) {
+                    const container = textarea.closest('.element-container');
+                    if (container) container.style.display = 'none';
+                }
+            });
+        }
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', hideEmptyInputs);
+        } else {
+            hideEmptyInputs();
+        }
+        
+        const observer = new MutationObserver(hideEmptyInputs);
+        observer.observe(document.body, { childList: true, subtree: true });
+    })();
+    </script>
+    """, unsafe_allow_html=True)
+    
     # ヘッダーHUD
     st.markdown('<div class="header-hud">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -520,32 +577,31 @@ def show_dashboard():
                         
                         tag_text = category
                         
-                        st.markdown(f"""
-                        <div class="task-item">
-                            <div style="display: flex; align-items: start;">
-                                <div style="margin-right: 0.5rem;">
-                        """, unsafe_allow_html=True)
+                        # タスクアイテムのコンテナ
+                        st.markdown(f'<div class="task-item">', unsafe_allow_html=True)
                         
-                        if st.checkbox("", key=f"complete_{row_num}", label_visibility="collapsed"):
-                            sheet = get_sheet("tasks")
-                            if sheet:
-                                sheet.update_cell(row_num, 4, "済")
-                                sheet.update_cell(row_num, 7, get_now_jst())
-                                # キャッシュをクリア
-                                get_sheet_data.clear()
-                                add_log_entry(f"タスク完了: {title[:30]}...")
-                                st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
-                                st.rerun()
+                        # チェックボックスとタスク内容を横並びに配置
+                        col_check, col_content = st.columns([0.15, 0.85], gap="small")
                         
-                        st.markdown(f"""
-                                </div>
-                                <div style="flex: 1;">
-                                    <div style="color: #e0e0e0; margin-bottom: 0.25rem;">{title}</div>
-                                    <span class="quest-tag {tag_class}">[{tag_text}]</span>
-                                </div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        with col_check:
+                            if st.checkbox("", key=f"complete_{row_num}", label_visibility="collapsed"):
+                                sheet = get_sheet("tasks")
+                                if sheet:
+                                    sheet.update_cell(row_num, 4, "済")
+                                    sheet.update_cell(row_num, 7, get_now_jst())
+                                    # キャッシュをクリア
+                                    get_sheet_data.clear()
+                                    add_log_entry(f"タスク完了: {title[:30]}...")
+                                    st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
+                                    st.rerun()
+                        
+                        with col_content:
+                            st.markdown(f"""
+                            <div style="color: #e0e0e0; margin-bottom: 0.25rem; line-height: 1.5;">{title}</div>
+                            <span class="quest-tag {tag_class}">[{tag_text}]</span>
+                            """, unsafe_allow_html=True)
+                        
+                        st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.info("未完了のタスクはありません。")
             else:
