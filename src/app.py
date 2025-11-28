@@ -535,17 +535,30 @@ class SheetManager:
             sheet = self.spreadsheet.worksheet(sheet_name)
             # シートが存在する場合は、ヘッダーを確認
             existing_headers = sheet.row_values(1)
-            if not existing_headers or existing_headers != headers:
-                # ヘッダーが一致しない場合は更新
-                sheet.clear()
-                sheet.append_row(headers)
+            if not existing_headers:
+                # ヘッダーが存在しない場合は追加
+                sheet.insert_row(headers, 1)
+            elif existing_headers != headers:
+                # ヘッダーが一致しない場合は、既存データを保持したままヘッダーのみ更新
+                # 既存データがある場合は、ヘッダーのみ更新（データは保持）
+                if len(existing_headers) == len(headers):
+                    # 列数が同じ場合は、ヘッダー行のみ更新
+                    for col_idx, header in enumerate(headers, 1):
+                        sheet.update_cell(1, col_idx, header)
+                else:
+                    # 列数が異なる場合は、警告を出してスキップ（既存データを保護）
+                    st.warning(f"シート '{sheet_name}' のヘッダーが異なりますが、既存データを保護するため更新をスキップしました。")
             return sheet
         except gspread.exceptions.WorksheetNotFound:
             # シートが存在しない場合は作成
-            sheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=len(headers))
-            sheet.append_row(headers)
-            self.clear_cache()
-            return sheet
+            try:
+                sheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=len(headers))
+                sheet.append_row(headers)
+                self.clear_cache()
+                return sheet
+            except Exception as e:
+                st.error(f"シート作成エラー: {e}")
+                return None
         except Exception as e:
             st.error(f"シート作成エラー: {e}")
             return None
@@ -576,12 +589,19 @@ class SheetManager:
                 return False
             
             new_id = self.get_next_id("activity_history")
-            now_str = get_now_jst()
+            # get_now_jst()をインポートして使用
+            from datetime import datetime
+            import pytz
+            now_str = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
+            
             sheet.append_row([new_id, action_type, entity_type, str(entity_id), entity_name, old_value, new_value, details, now_str])
             self.clear_cache()
             return True
         except Exception as e:
+            # エラーメッセージを詳細に表示
+            import traceback
             st.error(f"履歴記録エラー: {e}")
+            st.error(f"詳細: {traceback.format_exc()}")
             return False
 
 @st.cache_resource
