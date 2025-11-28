@@ -340,17 +340,60 @@ def init_gsheet():
 # スプレッドシート接続
 spreadsheet = init_gsheet()
 
-# シート取得関数
+# シート取得関数（リトライロジック付き）
+def get_sheet_with_retry(sheet_name, max_retries=3, retry_delay=2):
+    """指定されたシートを取得（リトライロジック付き）"""
+    import time
+    for attempt in range(max_retries):
+        try:
+            return spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            st.error(f"シート '{sheet_name}' が見つかりません。")
+            return None
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429:  # Rate limit exceeded
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    st.warning(f"APIレート制限に達しました。{wait_time}秒後に再試行します... (試行 {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    st.error(f"APIレート制限に達しました。しばらく待ってから再度お試しください。")
+                    st.info("💡 ヒント: ページをリロードするか、数分待ってから再度アクセスしてください。")
+                    return None
+            else:
+                st.error(f"シート '{sheet_name}' の取得エラー: {str(e)}")
+                return None
+        except Exception as e:
+            st.error(f"シート '{sheet_name}' の取得エラー: {str(e)}")
+            return None
+    return None
+
+# シート取得関数（後方互換性のため）
 def get_sheet(sheet_name):
     """指定されたシートを取得"""
-    try:
-        return spreadsheet.worksheet(sheet_name)
-    except gspread.exceptions.WorksheetNotFound:
-        st.error(f"シート '{sheet_name}' が見つかりません。")
-        return None
-    except Exception as e:
-        st.error(f"シート '{sheet_name}' の取得エラー: {str(e)}")
-        return None
+    return get_sheet_with_retry(sheet_name)
+
+# シートデータ取得関数（キャッシュ付き）
+@st.cache_data(ttl=30)  # 30秒間キャッシュ
+def get_sheet_data(sheet_name):
+    """シートの全データを取得（キャッシュ付き）"""
+    sheet = get_sheet_with_retry(sheet_name)
+    if sheet:
+        try:
+            return sheet.get_all_values()
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429:
+                st.error(f"APIレート制限に達しました。しばらく待ってから再度お試しください。")
+                st.info("💡 ヒント: ページをリロードするか、数分待ってから再度アクセスしてください。")
+                return []
+            else:
+                st.error(f"データ取得エラー: {str(e)}")
+                return []
+        except Exception as e:
+            st.error(f"データ取得エラー: {str(e)}")
+            return []
+    return []
 
 # 現在日時を取得（JST）
 def get_now_jst():
@@ -408,10 +451,9 @@ def show_dashboard():
     
     with col3:
         # 前回のレポート出力日時
-        settings_sheet = get_sheet("settings")
         last_report_at = "未記録"
-        if settings_sheet:
-            all_data = settings_sheet.get_all_values()
+        all_data = get_sheet_data("settings")
+        if all_data:
             for row in all_data:
                 if len(row) >= 2 and row[0] == "last_report_at":
                     last_report_at = row[1] if row[1] else "未記録"
@@ -447,9 +489,8 @@ def show_dashboard():
         </div>
         """, unsafe_allow_html=True)
         
-        sheet = get_sheet("tasks")
-        if sheet:
-            all_data = sheet.get_all_values()
+        all_data = get_sheet_data("tasks")
+        if all_data:
             if len(all_data) > 1:
                 headers = all_data[0]
                 rows = all_data[1:]
@@ -486,11 +527,15 @@ def show_dashboard():
                         """, unsafe_allow_html=True)
                         
                         if st.checkbox("", key=f"complete_{row_num}", label_visibility="collapsed"):
-                            sheet.update_cell(row_num, 4, "済")
-                            sheet.update_cell(row_num, 7, get_now_jst())
-                            add_log_entry(f"タスク完了: {title[:30]}...")
-                            st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
-                            st.rerun()
+                            sheet = get_sheet("tasks")
+                            if sheet:
+                                sheet.update_cell(row_num, 4, "済")
+                                sheet.update_cell(row_num, 7, get_now_jst())
+                                # キャッシュをクリア
+                                get_sheet_data.clear()
+                                add_log_entry(f"タスク完了: {title[:30]}...")
+                                st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
+                                st.rerun()
                         
                         st.markdown(f"""
                                 </div>
@@ -516,9 +561,8 @@ def show_dashboard():
         </div>
         """, unsafe_allow_html=True)
         
-        projects_sheet = get_sheet("projects")
-        if projects_sheet:
-            all_data = projects_sheet.get_all_values()
+        all_data = get_sheet_data("projects")
+        if all_data:
             if len(all_data) > 1:
                 rows = all_data[1:]
                 
@@ -636,7 +680,8 @@ def show_dashboard():
                     sheet = get_sheet("tasks")
                     if sheet:
                         try:
-                            existing_ids = [int(row[0]) for row in sheet.get_all_values()[1:] if row[0].isdigit()]
+                            all_data = get_sheet_data("tasks")
+                            existing_ids = [int(row[0]) for row in all_data[1:] if row and row[0].isdigit()]
                             new_id = max(existing_ids) + 1 if existing_ids else 1
                         except:
                             new_id = 1
@@ -651,6 +696,8 @@ def show_dashboard():
                             ""
                         ]
                         sheet.append_row(new_row)
+                        # キャッシュをクリア
+                        get_sheet_data.clear()
                         add_log_entry(f"タスクを追加: {task_title}")
                         st.success(f"タスク「{task_title}」を追加しました！")
                         st.rerun()
@@ -684,26 +731,31 @@ def show_projects():
             
             if submitted:
                 if project_theme:
-                    try:
-                        existing_ids = [int(row[0]) for row in sheet.get_all_values()[1:] if row[0].isdigit()]
-                        new_id = max(existing_ids) + 1 if existing_ids else 1
-                    except:
-                        new_id = 1
-                    
-                    new_row = [
-                        str(new_id),
-                        project_theme,
-                        project_type,
-                        project_blog_url or "",
-                        project_note_url or "",
-                        project_stamp_url or "",
-                        "進行中",
-                        get_now_jst()
-                    ]
-                    sheet.append_row(new_row)
-                    add_log_entry(f"プロジェクトを追加: {project_theme}")
-                    st.success(f"プロジェクト「{project_theme}」を追加しました！")
-                    st.rerun()
+                    sheet = get_sheet("projects")
+                    if sheet:
+                        try:
+                            all_data = get_sheet_data("projects")
+                            existing_ids = [int(row[0]) for row in all_data[1:] if row and row[0].isdigit()]
+                            new_id = max(existing_ids) + 1 if existing_ids else 1
+                        except:
+                            new_id = 1
+                        
+                        new_row = [
+                            str(new_id),
+                            project_theme,
+                            project_type,
+                            project_blog_url or "",
+                            project_note_url or "",
+                            project_stamp_url or "",
+                            "進行中",
+                            get_now_jst()
+                        ]
+                        sheet.append_row(new_row)
+                        # キャッシュをクリア
+                        get_sheet_data.clear()
+                        add_log_entry(f"プロジェクトを追加: {project_theme}")
+                        st.success(f"プロジェクト「{project_theme}」を追加しました！")
+                        st.rerun()
                 else:
                     st.warning("テーマを入力してください。")
     
@@ -714,8 +766,8 @@ def show_projects():
     </div>
     """, unsafe_allow_html=True)
     
-    all_data = sheet.get_all_values()
-    if len(all_data) > 1:
+    all_data = get_sheet_data("projects")
+    if all_data and len(all_data) > 1:
         headers = all_data[0]
         rows = all_data[1:]
         
@@ -748,16 +800,20 @@ def show_projects():
                     new_stamp_url = st.text_input("スタンプURL", value=stamp_url, key=f"stamp_{i}")
                 
                 if st.button("更新", key=f"update_{i}"):
-                    sheet.update_cell(i, 2, new_theme)
-                    sheet.update_cell(i, 3, new_type)
-                    sheet.update_cell(i, 4, new_blog_url)
-                    sheet.update_cell(i, 5, new_note_url)
-                    sheet.update_cell(i, 6, new_stamp_url)
-                    sheet.update_cell(i, 7, new_status)
-                    sheet.update_cell(i, 8, get_now_jst())
-                    add_log_entry(f"プロジェクトを更新: {new_theme}")
-                    st.success("プロジェクトを更新しました！")
-                    st.rerun()
+                    sheet = get_sheet("projects")
+                    if sheet:
+                        sheet.update_cell(i, 2, new_theme)
+                        sheet.update_cell(i, 3, new_type)
+                        sheet.update_cell(i, 4, new_blog_url)
+                        sheet.update_cell(i, 5, new_note_url)
+                        sheet.update_cell(i, 6, new_stamp_url)
+                        sheet.update_cell(i, 7, new_status)
+                        sheet.update_cell(i, 8, get_now_jst())
+                        # キャッシュをクリア
+                        get_sheet_data.clear()
+                        add_log_entry(f"プロジェクトを更新: {new_theme}")
+                        st.success("プロジェクトを更新しました！")
+                        st.rerun()
     else:
         st.info("プロジェクトがまだ登録されていません。")
 
@@ -790,7 +846,8 @@ def show_assets():
                         sheet = get_sheet("prompts")
                         if sheet:
                             try:
-                                existing_ids = [int(row[0]) for row in sheet.get_all_values()[1:] if row[0].isdigit()]
+                                all_data = get_sheet_data("prompts")
+                                existing_ids = [int(row[0]) for row in all_data[1:] if row and row[0].isdigit()]
                                 new_id = max(existing_ids) + 1 if existing_ids else 1
                             except:
                                 new_id = 1
@@ -803,6 +860,8 @@ def show_assets():
                                 get_now_jst()
                             ]
                             sheet.append_row(new_row)
+                            # キャッシュをクリア
+                            get_sheet_data.clear()
                             add_log_entry(f"新しいプロンプトを追加: {prompt_title}")
                             st.success(f"プロンプト「{prompt_title}」を追加しました！")
                             st.rerun()
@@ -812,30 +871,28 @@ def show_assets():
         st.markdown("---")
         st.subheader("プロンプト一覧")
         
-        sheet = get_sheet("prompts")
-        if sheet:
-            all_data = sheet.get_all_values()
-            if len(all_data) > 1:
-                rows = all_data[1:]
-                for row in rows:
-                    while len(row) < 5:
-                        row.append("")
-                    
-                    prompt_id = row[0] if len(row) > 0 else ""
-                    title = row[1] if len(row) > 1 else ""
-                    content = row[2] if len(row) > 2 else ""
-                    tags = row[3] if len(row) > 3 else ""
-                    created_at = row[4] if len(row) > 4 else ""
-                    
-                    with st.expander(f"📌 {title}"):
-                        st.markdown(f"**タグ:** {tags}")
+        all_data = get_sheet_data("prompts")
+        if all_data and len(all_data) > 1:
+            rows = all_data[1:]
+            for row in rows:
+                while len(row) < 5:
+                    row.append("")
+                
+                prompt_id = row[0] if len(row) > 0 else ""
+                title = row[1] if len(row) > 1 else ""
+                content = row[2] if len(row) > 2 else ""
+                tags = row[3] if len(row) > 3 else ""
+                created_at = row[4] if len(row) > 4 else ""
+                
+                with st.expander(f"📌 {title}"):
+                    st.markdown(f"**タグ:** {tags}")
+                    st.code(content, language=None)
+                    if st.button("📋 コピー", key=f"copy_prompt_{prompt_id}"):
                         st.code(content, language=None)
-                        if st.button("📋 コピー", key=f"copy_prompt_{prompt_id}"):
-                            st.code(content, language=None)
-                            st.success("コピーしました！")
-                        st.caption(f"作成日時: {created_at}")
-            else:
-                st.info("プロンプトがまだ登録されていません。")
+                        st.success("コピーしました！")
+                    st.caption(f"作成日時: {created_at}")
+        else:
+            st.info("プロンプトがまだ登録されていません。")
     
     with tab2:
         st.markdown("""
@@ -854,7 +911,8 @@ def show_assets():
                         sheet = get_sheet("ideas")
                         if sheet:
                             try:
-                                existing_ids = [int(row[0]) for row in sheet.get_all_values()[1:] if row[0].isdigit()]
+                                all_data = get_sheet_data("ideas")
+                                existing_ids = [int(row[0]) for row in all_data[1:] if row and row[0].isdigit()]
                                 new_id = max(existing_ids) + 1 if existing_ids else 1
                             except:
                                 new_id = 1
@@ -865,6 +923,8 @@ def show_assets():
                                 get_now_jst()
                             ]
                             sheet.append_row(new_row)
+                            # キャッシュをクリア
+                            get_sheet_data.clear()
                             add_log_entry("アイデアを追加しました。")
                             st.success("アイデアを追加しました！")
                             st.rerun()
@@ -874,24 +934,22 @@ def show_assets():
         st.markdown("---")
         st.subheader("アイデア一覧")
         
-        sheet = get_sheet("ideas")
-        if sheet:
-            all_data = sheet.get_all_values()
-            if len(all_data) > 1:
-                rows = all_data[1:]
-                for row in reversed(rows):
-                    while len(row) < 3:
-                        row.append("")
-                    
-                    idea_id = row[0] if len(row) > 0 else ""
-                    content = row[1] if len(row) > 1 else ""
-                    created_at = row[2] if len(row) > 2 else ""
-                    
-                    st.markdown(f"💭 {content}")
-                    st.caption(f"作成日時: {created_at}")
-                    st.markdown("---")
-            else:
-                st.info("アイデアがまだ登録されていません。")
+        all_data = get_sheet_data("ideas")
+        if all_data and len(all_data) > 1:
+            rows = all_data[1:]
+            for row in reversed(rows):
+                while len(row) < 3:
+                    row.append("")
+                
+                idea_id = row[0] if len(row) > 0 else ""
+                content = row[1] if len(row) > 1 else ""
+                created_at = row[2] if len(row) > 2 else ""
+                
+                st.markdown(f"💭 {content}")
+                st.caption(f"作成日時: {created_at}")
+                st.markdown("---")
+        else:
+            st.info("アイデアがまだ登録されていません。")
 
 # Note生成画面
 def show_note_generator():
@@ -902,11 +960,9 @@ def show_note_generator():
     """, unsafe_allow_html=True)
     
     # Settingsシートからlast_report_atを取得
-    settings_sheet = get_sheet("settings")
     last_report_at = None
-    
-    if settings_sheet:
-        all_data = settings_sheet.get_all_values()
+    all_data = get_sheet_data("settings")
+    if all_data:
         for row in all_data:
             if len(row) >= 2 and row[0] == "last_report_at":
                 last_report_at = row[1]
@@ -928,10 +984,8 @@ def show_note_generator():
     updated_projects = []
     
     # 完了したタスクを抽出
-    tasks_sheet = get_sheet("tasks")
-    if tasks_sheet:
-        all_data = tasks_sheet.get_all_values()
-        if len(all_data) > 1:
+    all_data = get_sheet_data("tasks")
+    if all_data and len(all_data) > 1:
             rows = all_data[1:]
             for row in rows:
                 while len(row) < 7:
@@ -954,10 +1008,8 @@ def show_note_generator():
                     })
     
     # 更新されたプロジェクトを抽出
-    projects_sheet = get_sheet("projects")
-    if projects_sheet:
-        all_data = projects_sheet.get_all_values()
-        if len(all_data) > 1:
+    all_data = get_sheet_data("projects")
+    if all_data and len(all_data) > 1:
             rows = all_data[1:]
             for row in rows:
                 while len(row) < 8:
@@ -1027,8 +1079,9 @@ def show_note_generator():
     col1, col2 = st.columns([1, 4])
     with col1:
         if st.button("🔄 更新してコピー", type="primary", use_container_width=True):
+            settings_sheet = get_sheet("settings")
             if settings_sheet:
-                all_data = settings_sheet.get_all_values()
+                all_data = get_sheet_data("settings")
                 found = False
                 for i, row in enumerate(all_data, start=1):
                     if len(row) >= 1 and row[0] == "last_report_at":
@@ -1038,6 +1091,9 @@ def show_note_generator():
                 
                 if not found:
                     settings_sheet.append_row(["last_report_at", get_now_jst()])
+                
+                # キャッシュをクリア
+                get_sheet_data.clear()
             
             add_log_entry("Note記事を生成しました。")
             st.subheader("📋 コピー用テキスト")
@@ -1082,12 +1138,12 @@ def main():
         "ナビゲーション",
         ["📊 ダッシュボード", "📁 プロジェクト管理", "💡 資産・アイデア", "📝 Note生成"],
         index=["📊 ダッシュボード", "📁 プロジェクト管理", "💡 資産・アイデア", "📝 Note生成"].index(default_page) if default_page in ["📊 ダッシュボード", "📁 プロジェクト管理", "💡 資産・アイデア", "📝 Note生成"] else 0,
+        key="nav_radio",
         label_visibility="visible"
     )
     
-    # ページが変更されたらセッション状態を更新
-    if page != st.session_state.get('page', None):
-        st.session_state.page = page
+    # ラジオボタンの値を常にセッション状態に同期（最新の選択を優先）
+    st.session_state.page = page
     
     st.sidebar.markdown("---")
     st.sidebar.caption(f"最終更新: {get_now_jst()}")
