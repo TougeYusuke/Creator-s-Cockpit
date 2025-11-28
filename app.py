@@ -30,6 +30,15 @@ COLORS = {
     "glass_bg": "rgba(14, 17, 23, 0.8)",
 }
 
+# カテゴリごとのアイコン定義
+CATEGORY_ICONS = {
+    "制作": "🎨",
+    "開発": "💻",
+    "学習": "📚",
+    "事務": "📎",
+    "その他": "🤔"
+}
+
 # ==========================================
 # 2. CSS & UI コンポーネント
 # ==========================================
@@ -42,7 +51,7 @@ def inject_custom_css():
         color: {COLORS['text_main']};
     }}
     
-    /* フォント設定 (デジタル感) */
+    /* フォント設定 */
     .digital-font {{
         font-family: 'Courier New', monospace;
         letter-spacing: 0.1em;
@@ -87,20 +96,6 @@ def inject_custom_css():
         color: #fff;
     }}
     
-    /* タスクカード */
-    .task-card {{
-        background: rgba(0, 0, 0, 0.4);
-        border-left: 3px solid #333;
-        padding: 12px;
-        margin-bottom: 8px;
-        border-radius: 0 4px 4px 0;
-        transition: transform 0.2s;
-    }}
-    .task-card:hover {{
-        transform: translateX(5px);
-        background: rgba(0, 255, 255, 0.05);
-    }}
-    
     /* カスタムタグ */
     .status-tag {{
         padding: 2px 8px;
@@ -110,18 +105,52 @@ def inject_custom_css():
         border: 1px solid;
     }}
     
-    /* Streamlit標準要素のオーバーライド */
-    .stButton > button {{
-        border: 1px solid {COLORS['accent_cyan']};
-        color: {COLORS['accent_cyan']};
-        background: rgba(0,0,0,0.5);
-        font-family: 'Courier New', monospace;
+    /* -----------------------------------------------------------------
+       【修正】ボタンの左寄せスタイル (横並び最適化)
+       無理な改行強制(block化)を廃止し、Flexboxで自然に左寄せします
+    ----------------------------------------------------------------- */
+    
+    /* ボタンコンテナ全体 */
+    div[data-testid="stButton"] > button {{
+        width: 100% !important;
+        height: auto !important;
+        padding: 12px 16px !important;
+        border-left: 4px solid #333 !important;
+        background: rgba(0, 0, 0, 0.4) !important;
+        color: {COLORS['text_main']} !important;
+        border: 1px solid rgba(0, 255, 255, 0.2) !important;
+        border-left-width: 4px !important;
+        
+        /* 左寄せの設定 (Flexbox) */
+        display: flex !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        
+        transition: all 0.2s;
+        font-family: 'Courier New', monospace !important;
     }}
-    .stButton > button:hover {{
-        background: {COLORS['accent_cyan']};
-        color: black;
-        box-shadow: 0 0 15px {COLORS['accent_cyan']};
+
+    /* ボタン内のテキスト要素 */
+    div[data-testid="stButton"] > button p {{
+        font-size: 1rem !important;
+        line-height: 1.5 !important;
     }}
+
+    /* ホバー時の挙動 */
+    div[data-testid="stButton"] > button:hover {{
+        background: rgba(0, 255, 255, 0.1) !important;
+        border-color: {COLORS['accent_cyan']} !important;
+        color: white !important;
+        box-shadow: 0 0 10px rgba(0, 255, 255, 0.1);
+        transform: translateX(4px);
+    }}
+    
+    /* クリック時 */
+    div[data-testid="stButton"] > button:active {{
+        background: {COLORS['accent_cyan']} !important;
+        color: black !important;
+    }}
+    
     </style>
     """, unsafe_allow_html=True)
 
@@ -250,8 +279,6 @@ def extract_urls(text):
     for line in lines:
         urls = url_pattern.findall(line)
         if urls:
-            # URLが見つかったら、ラベルはその行全体（URLを含む）とするか、URLそのものとする
-            # ここではシンプルに「ラベル: URL」の形式を想定して整形
             label = line.replace(urls[0], '').strip().strip(':').strip()
             if not label:
                 label = "Link"
@@ -297,7 +324,7 @@ def render_dashboard(manager):
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         st.title("メイン・コックピット")
-        st.caption("システム稼働中 | Creator's Cockpit v2.2")
+        st.caption("システム稼働中 | Creator's Cockpit v2.7")
     with c2:
         daily_exp = st.session_state.get('daily_exp', 0)
         st.metric("本日の成果数 (EXP)", f"{daily_exp}", delta="Action!")
@@ -316,6 +343,7 @@ def render_dashboard(manager):
 
     with col_main:
         st.markdown("### > 進行中のクエスト (未完了タスク)")
+        st.caption("※ タスクをクリックすると「完了」になります")
         
         tasks = manager.get_records("tasks")
         pending_tasks = [t for t in tasks if t.get('status') == '未']
@@ -324,28 +352,22 @@ def render_dashboard(manager):
             st.info("✨ 現在進行中のクエストはありません。全てのタスク完了です！")
         
         for task in pending_tasks[:5]:
-            border_color = COLORS['accent_cyan']
-            if task.get('category') == '制作': border_color = COLORS['accent_warn']
+            cat_icon = CATEGORY_ICONS.get(task.get('category'), "📌")
             
-            with st.container():
-                cols = st.columns([0.1, 0.9])
-                with cols[0]:
-                    if st.button("⬜", key=f"done_{task['id']}", help="完了にする"):
-                        manager.update_cell_by_id("tasks", task['id'], "status", "済")
-                        manager.update_cell_by_id("tasks", task['id'], "completed_at", get_now_jst())
-                        st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
-                        add_log(f"クエスト完了: {task['title']}")
-                        st.rerun()
-                with cols[1]:
-                    st.markdown(f"""
-                    <div class="task-card" style="border-left-color: {border_color};">
-                        <div style="font-weight:bold;">{task['title']}</div>
-                        <span class="status-tag" style="color:{border_color}; border-color:{border_color};">
-                            [{task.get('category')}]
-                        </span>
-                        <span style="font-size:0.8em; color:#888;">{task.get('memo', '')}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+            # ラベル生成 (横並び用にシンプル化、カテゴリはアイコンのみ)
+            label = f"⬜ {cat_icon} {task['title']}"
+            
+            if task.get('memo'):
+                # 横に続ける形式に変更
+                label += f" : {task.get('memo')}"
+            
+            # タスク全体を一つのボタンとして表示
+            if st.button(label, key=f"task_btn_{task['id']}", use_container_width=True, help="クリックして完了にする"):
+                manager.update_cell_by_id("tasks", task['id'], "status", "済")
+                manager.update_cell_by_id("tasks", task['id'], "completed_at", get_now_jst())
+                st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
+                add_log(f"クエスト完了: {task['title']}")
+                st.rerun()
 
         with st.expander("➕ 新規クエスト受注 (タスク追加)"):
             with st.form("add_task"):
@@ -386,7 +408,7 @@ def render_dashboard(manager):
 
 
 def render_project_manager(manager):
-    """プロジェクト管理画面（修正版）"""
+    """プロジェクト管理画面"""
     st.title("📁 プロジェクト作戦本部")
     
     projects = manager.get_records("projects")
@@ -394,14 +416,12 @@ def render_project_manager(manager):
         st.warning("プロジェクトデータがありません。")
     
     for proj in projects:
-        # ステータスによって表示色を変える
         status = proj.get('status', '進行中')
         header_prefix = "🔹" if status == '進行中' else "✅" if status == '完了' else "💤"
         
         with st.expander(f"{header_prefix} {proj.get('theme')} ({status})"):
             c1, c2 = st.columns([1, 1])
             with c1:
-                # 編集用フォーム
                 new_theme = st.text_input("テーマ", value=proj.get('theme'), key=f"th_{proj['id']}")
                 new_links = st.text_area("関連URL (一行に一つ)", value=proj.get('links', ''), height=100, key=f"lk_{proj['id']}", help="例: Note: https://note.com/...")
                 new_memo = st.text_area("プロジェクトメモ", value=proj.get('memo', ''), height=100, key=f"mm_{proj['id']}")
@@ -423,7 +443,6 @@ def render_project_manager(manager):
                         st.rerun()
 
             with c2:
-                # プレビュー表示エリア
                 st.markdown("#### 🔗 Quick Links")
                 links_text = proj.get('links', '')
                 formatted_links = extract_urls(links_text)
@@ -435,7 +454,6 @@ def render_project_manager(manager):
                 st.markdown("#### 📝 Memo")
                 st.info(proj.get('memo') or "メモなし")
 
-    # 新規プロジェクト作成フォーム
     st.markdown("---")
     with st.expander("➕ 新規プロジェクト立ち上げ", expanded=False):
         with st.form("new_proj"):
@@ -449,7 +467,6 @@ def render_project_manager(manager):
                     st.error("テーマ名は必須です")
                 else:
                     new_id = manager.get_next_id("projects")
-                    # 新しいスキーマ: id, theme, status, links, memo, updated_at
                     manager.add_row("projects", [new_id, theme, "進行中", links, memo, get_now_jst()])
                     st.success(f"プロジェクト「{theme}」を作成しました！")
                     st.rerun()
@@ -484,7 +501,6 @@ def render_note_generator(manager):
     if updated_projects:
         report_md += "\n### 🏗 進捗プロジェクト\n"
         for p in updated_projects:
-            # プロジェクトのリンクも含めるか、テーマだけにするか
             report_md += f"- {p['theme']} : {p['status']}\n"
             if p.get('memo'):
                  report_md += f"  - 📝 {p['memo']}\n"
