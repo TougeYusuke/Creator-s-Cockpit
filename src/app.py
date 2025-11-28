@@ -529,6 +529,61 @@ class SheetManager:
             st.error(f"削除エラー: {e}")
             return False
 
+    def ensure_sheet_exists(self, sheet_name, headers):
+        """シートが存在しない場合は作成し、ヘッダーを設定する"""
+        try:
+            sheet = self.spreadsheet.worksheet(sheet_name)
+            # シートが存在する場合は、ヘッダーを確認
+            existing_headers = sheet.row_values(1)
+            if not existing_headers or existing_headers != headers:
+                # ヘッダーが一致しない場合は更新
+                sheet.clear()
+                sheet.append_row(headers)
+            return sheet
+        except gspread.exceptions.WorksheetNotFound:
+            # シートが存在しない場合は作成
+            sheet = self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=len(headers))
+            sheet.append_row(headers)
+            self.clear_cache()
+            return sheet
+        except Exception as e:
+            st.error(f"シート作成エラー: {e}")
+            return None
+
+    def add_comment_history(self, project_id, theme, memo, updated_at):
+        """プロジェクトコメント履歴を記録（後方互換性のため残す）
+        project_comments_historyシートにのみ記録し、activity_historyには記録しない"""
+        try:
+            headers = ["id", "project_id", "theme", "memo", "updated_at"]
+            sheet = self.ensure_sheet_exists("project_comments_history", headers)
+            if not sheet:
+                return False
+            
+            new_id = self.get_next_id("project_comments_history")
+            sheet.append_row([new_id, project_id, theme, memo, updated_at])
+            self.clear_cache()
+            return True
+        except Exception as e:
+            st.error(f"履歴記録エラー: {e}")
+            return False
+
+    def add_activity_history(self, action_type, entity_type, entity_id, entity_name, old_value="", new_value="", details=""):
+        """すべての活動履歴を記録する汎用メソッド"""
+        try:
+            headers = ["id", "action_type", "entity_type", "entity_id", "entity_name", "old_value", "new_value", "details", "created_at"]
+            sheet = self.ensure_sheet_exists("activity_history", headers)
+            if not sheet:
+                return False
+            
+            new_id = self.get_next_id("activity_history")
+            now_str = get_now_jst()
+            sheet.append_row([new_id, action_type, entity_type, str(entity_id), entity_name, old_value, new_value, details, now_str])
+            self.clear_cache()
+            return True
+        except Exception as e:
+            st.error(f"履歴記録エラー: {e}")
+            return False
+
 @st.cache_resource
 def get_sheet_manager():
     return SheetManager()
@@ -656,6 +711,16 @@ def render_dashboard(manager):
                         # カラム構成: id, content, created_at
                         ok = manager.add_row("ideas", [new_idea_id, idea_content, get_now_jst()])
                         if ok:
+                            # 活動履歴に記録
+                            manager.add_activity_history(
+                                action_type="アイデア追加",
+                                entity_type="ideas",
+                                entity_id=new_idea_id,
+                                entity_name=idea_content[:50] + "..." if len(idea_content) > 50 else idea_content,
+                                old_value="",
+                                new_value=idea_content,
+                                details=""
+                            )
                             add_log(f"新規アイデア追加: {idea_content[:20]}...")
                             st.success("アイデアを保存しました！")
                             st.session_state["show_idea_form"] = False
@@ -714,8 +779,19 @@ def render_dashboard(manager):
             
             # タスクボタン
             if st.button(label, key=f"task_{task['id']}", use_container_width=True, help="完了にする"):
+                now_str = get_now_jst()
                 manager.update_cell_by_id("tasks", task['id'], "status", "済")
-                manager.update_cell_by_id("tasks", task['id'], "completed_at", get_now_jst())
+                manager.update_cell_by_id("tasks", task['id'], "completed_at", now_str)
+                # 活動履歴に記録
+                manager.add_activity_history(
+                    action_type="タスク完了",
+                    entity_type="tasks",
+                    entity_id=task['id'],
+                    entity_name=title,
+                    old_value="未",
+                    new_value="済",
+                    details=f"カテゴリ: {cat}" + (f", メモ: {memo}" if memo else "")
+                )
                 st.session_state.daily_exp = st.session_state.get('daily_exp', 0) + 1
                 add_log(f"クエスト完了: {title}")
                 st.rerun()
@@ -734,7 +810,18 @@ def render_dashboard(manager):
                 if st.form_submit_button("登録する", use_container_width=True):
                     if new_title:
                         new_id = manager.get_next_id("tasks")
-                        manager.add_row("tasks", [new_id, new_title, new_cat, "未", new_memo, get_now_jst(), ""])
+                        now_str = get_now_jst()
+                        manager.add_row("tasks", [new_id, new_title, new_cat, "未", new_memo, now_str, ""])
+                        # 活動履歴に記録
+                        manager.add_activity_history(
+                            action_type="タスク追加",
+                            entity_type="tasks",
+                            entity_id=new_id,
+                            entity_name=new_title,
+                            old_value="",
+                            new_value="未",
+                            details=f"カテゴリ: {new_cat}" + (f", メモ: {new_memo}" if new_memo else "")
+                        )
                         add_log(f"新規クエスト追加: {new_title}")
                         st.success("登録しました")
                         time.sleep(0.5)
@@ -840,9 +927,37 @@ def render_project_manager(manager):
                                         key=f"st_{proj['id']}")
                 
                 if st.button("更新を保存", key=f"upd_{proj['id']}"):
-                    manager.update_cell_by_id("projects", proj['id'], "theme", new_theme)
-                    manager.update_cell_by_id("projects", proj['id'], "status", new_status)
-                    manager.update_cell_by_id("projects", proj['id'], "updated_at", get_now_jst())
+                    old_theme = proj.get('theme', '')
+                    old_status = proj.get('status', '')
+                    now_str = get_now_jst()
+                    
+                    # テーマが変更された場合
+                    if new_theme != old_theme:
+                        manager.update_cell_by_id("projects", proj['id'], "theme", new_theme)
+                        manager.add_activity_history(
+                            action_type="プロジェクトテーマ更新",
+                            entity_type="projects",
+                            entity_id=proj['id'],
+                            entity_name=new_theme,
+                            old_value=old_theme,
+                            new_value=new_theme,
+                            details=""
+                        )
+                    
+                    # ステータスが変更された場合
+                    if new_status != old_status:
+                        manager.update_cell_by_id("projects", proj['id'], "status", new_status)
+                        manager.add_activity_history(
+                            action_type="プロジェクトステータス更新",
+                            entity_type="projects",
+                            entity_id=proj['id'],
+                            entity_name=new_theme if new_theme != old_theme else old_theme,
+                            old_value=old_status,
+                            new_value=new_status,
+                            details=""
+                        )
+                    
+                    manager.update_cell_by_id("projects", proj['id'], "updated_at", now_str)
                     st.success("更新しました！")
                     time.sleep(0.5)
                     st.rerun()
@@ -856,9 +971,30 @@ def render_project_manager(manager):
                 
                 # ここだけ個別保存ボタン（誤操作防止のため）
                 if st.button("詳細を保存", key=f"det_{proj['id']}"):
+                    old_memo = proj.get('memo', '')
                     manager.update_cell_by_id("projects", proj['id'], "links", new_links)
                     manager.update_cell_by_id("projects", proj['id'], "memo", new_memo)
+                    # メモが変更された場合、memo_updated_atを更新し、履歴に記録
+                    if new_memo != old_memo:
+                        now_str = get_now_jst()
+                        manager.update_cell_by_id("projects", proj['id'], "memo_updated_at", now_str)
+                        # 活動履歴に記録
+                        theme = proj.get('theme', '')
+                        manager.add_activity_history(
+                            action_type="プロジェクトコメント更新",
+                            entity_type="projects",
+                            entity_id=proj['id'],
+                            entity_name=theme,
+                            old_value=old_memo,
+                            new_value=new_memo,
+                            details=""
+                        )
+                        # 後方互換性のため、project_comments_historyにも記録（activity_historyには記録しない）
+                        manager.add_comment_history(proj['id'], theme, new_memo, now_str)
+                        add_log(f"プロジェクトコメント履歴記録: {theme}")
                     st.success("詳細を保存しました")
+                    time.sleep(0.5)
+                    st.rerun()
 
     st.markdown("---")
     with st.expander("➕ 新規プロジェクト立ち上げ", expanded=False):
@@ -871,8 +1007,25 @@ def render_project_manager(manager):
             if st.form_submit_button("作成する"):
                 if f_theme:
                     new_id = manager.get_next_id("projects")
-                    # id, theme, status, links, memo, updated_at
-                    manager.add_row("projects", [new_id, f_theme, "進行中", f_links, f_memo, get_now_jst()])
+                    now_str = get_now_jst()
+                    # id, theme, status, links, memo, updated_at, memo_updated_at
+                    # メモが入力されている場合、memo_updated_atも設定し、履歴に記録
+                    memo_updated_at = now_str if f_memo.strip() else ""
+                    manager.add_row("projects", [new_id, f_theme, "進行中", f_links, f_memo, now_str, memo_updated_at])
+                    # 活動履歴に記録
+                    manager.add_activity_history(
+                        action_type="プロジェクト作成",
+                        entity_type="projects",
+                        entity_id=new_id,
+                        entity_name=f_theme,
+                        old_value="",
+                        new_value="進行中",
+                        details=f"メモ: {f_memo}" if f_memo.strip() else ""
+                    )
+                    # メモが入力されている場合、コメント履歴にも記録
+                    if f_memo.strip():
+                        manager.add_comment_history(new_id, f_theme, f_memo, now_str)
+                        add_log(f"新規プロジェクトコメント履歴記録: {f_theme}")
                     st.success(f"プロジェクト「{f_theme}」を作成しました")
                     time.sleep(0.5)
                     st.rerun()
@@ -894,36 +1047,66 @@ def render_report_generator(manager):
             
     st.info(f"🕒 前回のセーブ日時: **{last_report_at}**")
     
-    # データ抽出
-    tasks = manager.get_records("tasks")
-    projects = manager.get_records("projects")
+    # 活動履歴シートからすべての履歴を取得
+    activity_history = manager.get_records("activity_history")
+    recent_activities = [a for a in activity_history if a.get('created_at', '') > last_report_at]
     
-    completed_tasks = [t for t in tasks if t.get('status') == '済' and t.get('completed_at', '') > last_report_at]
-    updated_projects = [p for p in projects if p.get('updated_at', '') > last_report_at]
+    # 時系列でソート
+    recent_activities.sort(key=lambda x: x.get('created_at', ''))
     
     # レポート本文作成
     report_text = f"## 🚀 活動レポート ({get_now_jst()[:10]})\n\n"
     
-    if completed_tasks:
-        report_text += "### ✅ 完了したクエスト\n"
-        for t in completed_tasks:
-            cat = t.get('category', '')
-            title = t.get('title', '')
-            memo = t.get('memo', '')
-            report_text += f"- {title} 【{cat}】\n"
-            if memo:
-                report_text += f"  - 📝 {memo}\n"
-        report_text += "\n"
+    if recent_activities:
+        report_text += "### 📋 活動履歴（時系列）\n\n"
         
-    if updated_projects:
-        report_text += "### 🏗 プロジェクト進捗\n"
-        for p in updated_projects:
-            theme = p.get('theme', '')
-            status = p.get('status', '')
-            report_text += f"- {theme} : **{status}**\n"
-        report_text += "\n"
+        # アクションタイプごとにアイコンを設定
+        action_icons = {
+            "タスク追加": "➕",
+            "タスク完了": "✅",
+            "プロジェクト作成": "🆕",
+            "プロジェクトステータス更新": "🔄",
+            "プロジェクトテーマ更新": "✏️",
+            "プロジェクトコメント更新": "💬",
+            "アイデア追加": "💡"
+        }
         
-    if not completed_tasks and not updated_projects:
+        for activity in recent_activities:
+            action_type = activity.get('action_type', '')
+            entity_name = activity.get('entity_name', '')
+            entity_type = activity.get('entity_type', '')
+            old_value = activity.get('old_value', '')
+            new_value = activity.get('new_value', '')
+            details = activity.get('details', '')
+            created_at = activity.get('created_at', '')
+            
+            icon = action_icons.get(action_type, "📝")
+            
+            report_text += f"**{icon} {action_type}** ({created_at})\n"
+            report_text += f"- **対象**: {entity_name} ({entity_type})\n"
+            
+            # プロジェクトコメント更新の場合は、コメント内容を詳細に表示（通常の内容表示はスキップ）
+            if action_type == "プロジェクトコメント更新" and new_value:
+                memo_lines = new_value.strip().split('\n')
+                if len(memo_lines) > 1 or (len(memo_lines) == 1 and memo_lines[0].strip()):
+                    report_text += f"- **コメント内容**:\n"
+                    for line in memo_lines:
+                        if line.strip():
+                            report_text += f"  - {line.strip()}\n"
+            else:
+                # その他のアクションタイプは通常の表示
+                if old_value and new_value:
+                    report_text += f"- **変更**: {old_value} → {new_value}\n"
+                elif new_value:
+                    report_text += f"- **内容**: {new_value}\n"
+            
+            if details:
+                report_text += f"- **詳細**: {details}\n"
+            
+            report_text += "\n"
+        
+        report_text += "\n"
+    else:
         report_text += "（前回の出力から更新されたデータはありません）\n\n"
         
     report_text += "### 💭 振り返り・メモ\n(ここに本日の感想を記入...)\n"
@@ -1015,6 +1198,16 @@ def render_assets_and_ideas(manager):
                             new_id = manager.get_next_id("ideas")
                             ok = manager.add_row("ideas", [new_id, new_content, get_now_jst()])
                             if ok:
+                                # 活動履歴に記録
+                                manager.add_activity_history(
+                                    action_type="アイデア追加",
+                                    entity_type="ideas",
+                                    entity_id=new_id,
+                                    entity_name=new_content[:50] + "..." if len(new_content) > 50 else new_content,
+                                    old_value="",
+                                    new_value=new_content,
+                                    details=""
+                                )
                                 add_log(f"新規アイデア追加(ASSETS): {new_content[:20]}...")
                                 st.success("アイデアを登録しました！")
                                 st.session_state["show_assets_idea_form"] = False
