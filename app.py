@@ -5,6 +5,7 @@ from datetime import datetime
 import pytz
 import time
 import pandas as pd
+import re
 
 # ==========================================
 # 1. 設定 & 定数
@@ -172,7 +173,6 @@ class SheetManager:
             sheet = _self.spreadsheet.worksheet(sheet_name)
             return sheet.get_all_records()
         except gspread.exceptions.WorksheetNotFound:
-            # シートがない場合はNoneを返すか空リスト
             return []
         except Exception as e:
             st.error(f"データ取得エラー ({sheet_name}): {e}")
@@ -239,6 +239,25 @@ def add_log(message):
     st.session_state.system_log.append(f"[{time_str}] {message}")
     st.session_state.system_log = st.session_state.system_log[-20:]
 
+def extract_urls(text):
+    """テキストからURLを抽出してリンク化する簡易パーサー"""
+    if not text:
+        return []
+    lines = text.split('\n')
+    links = []
+    url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+    
+    for line in lines:
+        urls = url_pattern.findall(line)
+        if urls:
+            # URLが見つかったら、ラベルはその行全体（URLを含む）とするか、URLそのものとする
+            # ここではシンプルに「ラベル: URL」の形式を想定して整形
+            label = line.replace(urls[0], '').strip().strip(':').strip()
+            if not label:
+                label = "Link"
+            links.append(f"[{label}]({urls[0]})")
+    return links
+
 # ==========================================
 # 5. 各ページコンポーネント
 # ==========================================
@@ -273,12 +292,12 @@ def render_warp_gate(manager):
 
 def render_dashboard(manager):
     """ダッシュボード画面"""
-    # --- HUD (ヘッドアップディスプレイ) ---
+    # --- HUD ---
     st.markdown('<div class="header-hud">', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         st.title("メイン・コックピット")
-        st.caption("システム稼働中 | Creator's Cockpit v2.1")
+        st.caption("システム稼働中 | Creator's Cockpit v2.2")
     with c2:
         daily_exp = st.session_state.get('daily_exp', 0)
         st.metric("本日の成果数 (EXP)", f"{daily_exp}", delta="Action!")
@@ -288,7 +307,6 @@ def render_dashboard(manager):
         for s in settings:
             if s.get('key') == 'last_report_at':
                 last_report = s.get('value')
-        # 日時を短く表示
         disp_time = last_report[:16] if len(last_report) > 10 else last_report
         st.metric("最終セーブ (レポート出力)", disp_time)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -305,7 +323,7 @@ def render_dashboard(manager):
         if not pending_tasks:
             st.info("✨ 現在進行中のクエストはありません。全てのタスク完了です！")
         
-        for task in pending_tasks[:5]: # 表示は最大5件まで
+        for task in pending_tasks[:5]:
             border_color = COLORS['accent_cyan']
             if task.get('category') == '制作': border_color = COLORS['accent_warn']
             
@@ -353,13 +371,12 @@ def render_dashboard(manager):
             <div style="margin-bottom:10px; padding:10px; border:1px solid {color}; border-radius:4px;">
                 <div style="font-size:0.8em; color:{color}">{proj.get('theme')}</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size:0.7em;">{proj.get('type')}</span>
                     <span class="status-tag" style="border-color:{color}; color:{color}">{status}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
-    # --- ログエリア ---
+    # --- ログ ---
     st.markdown("---")
     st.markdown("### > システムログ")
     log_area = st.empty()
@@ -369,7 +386,7 @@ def render_dashboard(manager):
 
 
 def render_project_manager(manager):
-    """プロジェクト管理画面"""
+    """プロジェクト管理画面（修正版）"""
     st.title("📁 プロジェクト作戦本部")
     
     projects = manager.get_records("projects")
@@ -377,34 +394,65 @@ def render_project_manager(manager):
         st.warning("プロジェクトデータがありません。")
     
     for proj in projects:
-        with st.expander(f"🔹 {proj.get('theme')} ({proj.get('status')})"):
-            c1, c2 = st.columns(2)
+        # ステータスによって表示色を変える
+        status = proj.get('status', '進行中')
+        header_prefix = "🔹" if status == '進行中' else "✅" if status == '完了' else "💤"
+        
+        with st.expander(f"{header_prefix} {proj.get('theme')} ({status})"):
+            c1, c2 = st.columns([1, 1])
             with c1:
-                st.text_input("テーマ", value=proj.get('theme'), key=f"p_th_{proj['id']}", disabled=True)
-                st.write(f"タイプ: {proj.get('type')}")
-            with c2:
-                # リンク集
-                links = []
-                if proj.get('blog_url'): links.append(f"[ブログ]({proj.get('blog_url')})")
-                if proj.get('note_url'): links.append(f"[Note]({proj.get('note_url')})")
-                if proj.get('stamp_url'): links.append(f"[スタンプ]({proj.get('stamp_url')})")
-                st.markdown(" | ".join(links) if links else "リンクなし")
-            
-            if st.button("プロジェクト完了申請", key=f"comp_p_{proj['id']}"):
-                manager.update_cell_by_id("projects", proj['id'], "status", "完了")
-                manager.update_cell_by_id("projects", proj['id'], "updated_at", get_now_jst())
-                st.success("ステータスを更新しました！")
-                st.rerun()
+                # 編集用フォーム
+                new_theme = st.text_input("テーマ", value=proj.get('theme'), key=f"th_{proj['id']}")
+                new_links = st.text_area("関連URL (一行に一つ)", value=proj.get('links', ''), height=100, key=f"lk_{proj['id']}", help="例: Note: https://note.com/...")
+                new_memo = st.text_area("プロジェクトメモ", value=proj.get('memo', ''), height=100, key=f"mm_{proj['id']}")
+                
+                c_act1, c_act2 = st.columns(2)
+                with c_act1:
+                    new_status = st.selectbox("状態", ["進行中", "完了", "保留"], 
+                                            index=["進行中", "完了", "保留"].index(status) if status in ["進行中", "完了", "保留"] else 0,
+                                            key=f"st_{proj['id']}")
+                with c_act2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("更新保存", key=f"upd_{proj['id']}"):
+                        manager.update_cell_by_id("projects", proj['id'], "theme", new_theme)
+                        manager.update_cell_by_id("projects", proj['id'], "links", new_links)
+                        manager.update_cell_by_id("projects", proj['id'], "memo", new_memo)
+                        manager.update_cell_by_id("projects", proj['id'], "status", new_status)
+                        manager.update_cell_by_id("projects", proj['id'], "updated_at", get_now_jst())
+                        st.success("プロジェクト情報を更新しました！")
+                        st.rerun()
 
+            with c2:
+                # プレビュー表示エリア
+                st.markdown("#### 🔗 Quick Links")
+                links_text = proj.get('links', '')
+                formatted_links = extract_urls(links_text)
+                if formatted_links:
+                    st.markdown(" | ".join(formatted_links))
+                else:
+                    st.caption("リンク設定なし")
+                
+                st.markdown("#### 📝 Memo")
+                st.info(proj.get('memo') or "メモなし")
+
+    # 新規プロジェクト作成フォーム
+    st.markdown("---")
     with st.expander("➕ 新規プロジェクト立ち上げ", expanded=False):
         with st.form("new_proj"):
-            theme = st.text_input("テーマ名")
-            ptype = st.selectbox("タイプ", ["mix (3媒体)", "single (単発)"])
+            st.subheader("New Project Launch")
+            theme = st.text_input("プロジェクトテーマ (必須)")
+            links = st.text_area("関連URL (任意・複数可)", placeholder="Blog: https://...\nFigma: https://...")
+            memo = st.text_area("メモ (任意)")
+            
             if st.form_submit_button("プロジェクト開始"):
-                new_id = manager.get_next_id("projects")
-                manager.add_row("projects", [new_id, theme, ptype, "", "", "", "進行中", get_now_jst()])
-                st.success("プロジェクトを作成しました！")
-                st.rerun()
+                if not theme:
+                    st.error("テーマ名は必須です")
+                else:
+                    new_id = manager.get_next_id("projects")
+                    # 新しいスキーマ: id, theme, status, links, memo, updated_at
+                    manager.add_row("projects", [new_id, theme, "進行中", links, memo, get_now_jst()])
+                    st.success(f"プロジェクト「{theme}」を作成しました！")
+                    st.rerun()
 
 
 def render_note_generator(manager):
@@ -436,7 +484,10 @@ def render_note_generator(manager):
     if updated_projects:
         report_md += "\n### 🏗 進捗プロジェクト\n"
         for p in updated_projects:
+            # プロジェクトのリンクも含めるか、テーマだけにするか
             report_md += f"- {p['theme']} : {p['status']}\n"
+            if p.get('memo'):
+                 report_md += f"  - 📝 {p['memo']}\n"
             
     if not completed_tasks and not updated_projects:
         report_md += "（前回のセーブから更新されたデータはありません）\n"
@@ -466,7 +517,6 @@ def main():
     
     with st.sidebar:
         st.title("ナビゲーション")
-        # わかりやすい日本語メニューに変更
         page_map = {
             "ダッシュボード": "DASHBOARD",
             "プロジェクト管理": "CAMPAIGN",
