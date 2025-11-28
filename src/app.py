@@ -362,7 +362,36 @@ def render_warp_gate(manager):
 
 def render_dashboard(manager):
     """ダッシュボード (メイン画面)"""
-    
+    # --- クイックアイデア追加ボタン（ページ最上部） ---
+    st.markdown("### 💡 クイックアイデア追加")
+    col_idea_btn, col_idea_dummy = st.columns([3, 1])
+    with col_idea_btn:
+        if st.button("💡 新しいアイデアを追加する", type="primary", use_container_width=True, key="add_idea_top"):
+            st.session_state["show_idea_form"] = True
+
+    # ボタン押下時に表示するアイデア入力フォーム
+    if st.session_state.get("show_idea_form", False):
+        with st.expander("✏️ アイデアを登録する", expanded=True):
+            with st.form("idea_quick_add_form"):
+                idea_title = st.text_input("アイデアタイトル (必須)")
+                idea_category = st.selectbox("カテゴリ", list(CATEGORY_ICONS.keys()))
+                idea_memo = st.text_area("メモ / 補足", height=4)
+
+                submitted_idea = st.form_submit_button("このアイデアを保存する", use_container_width=True)
+                if submitted_idea:
+                    if idea_title:
+                        new_idea_id = manager.get_next_id("ideas")
+                        # 想定カラム: id, title, category, memo, created_at
+                        ok = manager.add_row("ideas", [new_idea_id, idea_title, idea_category, idea_memo, get_now_jst()])
+                        if ok:
+                            add_log(f"新規アイデア追加: {idea_title}")
+                            st.success("アイデアを保存しました！")
+                            st.session_state["show_idea_form"] = False
+                            time.sleep(0.5)
+                            st.rerun()
+                    else:
+                        st.error("アイデアタイトルを入力してください。")
+
     # --- HUD (上部ステータス) ---
     st.markdown('<div class="header-hud">', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2, 1, 1])
