@@ -101,6 +101,7 @@ def inject_custom_css():
         border-radius: 6px;
         transition: all 0.2s;
         font-size: 0.9rem;
+        font-weight: 600;
     }}
     .warp-gate-btn:hover {{
         background: rgba(0, 255, 255, 0.1);
