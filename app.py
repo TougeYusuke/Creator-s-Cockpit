@@ -387,14 +387,35 @@ def render_dashboard(manager):
         
         for proj in projects[:5]:
             status = proj.get('status', '進行中')
-            color = COLORS['accent_green'] if status=='完了' else COLORS['accent_blue']
+            color = COLORS['accent_green'] if status == '完了' else COLORS['accent_blue']
             
+            # リンクとメモの取得（ダッシュボードではHTMLアンカーとして表示）
+            links_text = proj.get('links', '') or ''
+            links = []
+            if links_text:
+                url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+                for line in links_text.split('\n'):
+                    urls = url_pattern.findall(line)
+                    if urls:
+                        label = line.replace(urls[0], '').strip().strip(':').strip()
+                        if not label:
+                            label = "Link"
+                        links.append(f"<a href='{urls[0]}' target='_blank' style='color:{COLORS['accent_cyan']}; text-decoration:none;'>{label}</a>")
+            links_html = " | ".join(links) if links else ""
+            
+            memo_text = proj.get('memo') or ""
+            
+            # カード表示（テーマ＋ステータス＋リンク＋メモ）
             st.markdown(f"""
             <div style="margin-bottom:10px; padding:10px; border:1px solid {color}; border-radius:4px;">
-                <div style="font-size:0.8em; color:{color}">{proj.get('theme')}</div>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size:0.8em; color:{color}; font-weight:bold;">
+                    {proj.get('theme')}
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
                     <span class="status-tag" style="border-color:{color}; color:{color}">{status}</span>
                 </div>
+                {"<div style='font-size:0.75em; margin-top:6px;'>" + links_html + "</div>" if links_html else ""}
+                {("<div style='font-size:0.75em; margin-top:4px; color:#cccccc;'>📝 " + memo_text + "</div>") if memo_text else ""}
             </div>
             """, unsafe_allow_html=True)
             
