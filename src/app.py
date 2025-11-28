@@ -374,22 +374,40 @@ def render_warp_gate(manager):
 
     df = pd.DataFrame(shortcuts)
     if 'category' in df.columns:
-        categories = df['category'].unique()
-        for cat in categories:
-            # アイコンがあれば先頭につける
-            label = f"📂 {cat}"
-            with st.sidebar.expander(label, expanded=False):
-                cat_items = df[df['category'] == cat]
-                for _, item in cat_items.iterrows():
-                    icon = item.get('icon', '🔗')
-                    label = item.get('label', 'Link')
-                    url = item.get('url', '#')
-                    
-                    st.markdown(f"""
-                    <a href="{url}" target="_blank" class="warp-gate-btn">
-                        {icon} {label}
-                    </a>
-                    """, unsafe_allow_html=True)
+        # カテゴリが空欄 or "Root" のものは「フォルダに格納しない」フラット表示
+        cat_series = df['category'].astype(str).fillna("")
+        mask_root = cat_series.str.strip().isin(["", "Root"])
+        df_root = df[mask_root]
+        df_with_cat = df[~mask_root]
+
+        # まず Root / 空カテゴリのリンクをフラット表示
+        for _, item in df_root.iterrows():
+            icon = item.get('icon', '🔗')
+            label = item.get('label', 'Link')
+            url = item.get('url', '#')
+            st.sidebar.markdown(f"""
+            <a href="{url}" target="_blank" class="warp-gate-btn">
+                {icon} {label}
+            </a>
+            """, unsafe_allow_html=True)
+
+        # それ以外のカテゴリはフォルダ（expander）として表示
+        if not df_with_cat.empty:
+            categories = df_with_cat['category'].unique()
+            for cat in categories:
+                folder_label = f"📂 {cat}"
+                with st.sidebar.expander(folder_label, expanded=False):
+                    cat_items = df_with_cat[df_with_cat['category'] == cat]
+                    for _, item in cat_items.iterrows():
+                        icon = item.get('icon', '🔗')
+                        label = item.get('label', 'Link')
+                        url = item.get('url', '#')
+                        
+                        st.markdown(f"""
+                        <a href="{url}" target="_blank" class="warp-gate-btn">
+                            {icon} {label}
+                        </a>
+                        """, unsafe_allow_html=True)
 
 def render_dashboard(manager):
     """ダッシュボード (メイン画面)"""
