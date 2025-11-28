@@ -194,10 +194,9 @@ class SheetManager:
             return False
 
     def update_cell_by_id(self, sheet_name, id_val, col_name, new_value):
-        """IDを指定してセルを更新 (ヘッダー名から列を特定)"""
+        """IDを指定してセルを更新"""
         try:
             sheet = self.spreadsheet.worksheet(sheet_name)
-            # ヘッダー行を取得して列インデックスを探す
             headers = sheet.row_values(1)
             try:
                 col_index = headers.index(col_name) + 1
@@ -205,7 +204,6 @@ class SheetManager:
                 st.error(f"カラム '{col_name}' が見つかりません")
                 return False
 
-            # IDの列を探す (通常は1列目 'id' と仮定)
             cell = sheet.find(str(id_val), in_column=1)
             if cell:
                 sheet.update_cell(cell.row, col_index, new_value)
@@ -223,7 +221,6 @@ class SheetManager:
         records = self.get_records(sheet_name)
         if not records:
             return 1
-        # 文字列IDの場合も考慮してint変換
         ids = [int(r['id']) for r in records if str(r['id']).isdigit()]
         return max(ids) + 1 if ids else 1
 
@@ -240,7 +237,6 @@ def add_log(message):
     
     time_str = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%H:%M:%S')
     st.session_state.system_log.append(f"[{time_str}] {message}")
-    # 最新20件保持
     st.session_state.system_log = st.session_state.system_log[-20:]
 
 # ==========================================
@@ -248,18 +244,16 @@ def add_log(message):
 # ==========================================
 
 def render_warp_gate(manager):
-    """サイドバー：外部リンク集 (Warp Gate)"""
+    """サイドバー：外部リンク集"""
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🌌 Warp Gate")
+    st.sidebar.markdown("### 🌌 ワープゲート (リンク集)")
     
-    # シートからショートカット読み込み
     shortcuts = manager.get_records("shortcuts")
     
     if not shortcuts:
-        st.sidebar.info("No links connected.")
+        st.sidebar.info("リンクが設定されていません (shortcutsシートを確認)")
         return
 
-    # カテゴリごとにグループ化
     df = pd.DataFrame(shortcuts)
     if 'category' in df.columns:
         categories = df['category'].unique()
@@ -271,7 +265,6 @@ def render_warp_gate(manager):
                     label = item.get('label', 'Link')
                     url = item.get('url', '#')
                     
-                    # HTMLでリンクボタンを描画
                     st.markdown(f"""
                     <a href="{url}" target="_blank" class="warp-gate-btn">
                         {icon} {label}
@@ -280,47 +273,45 @@ def render_warp_gate(manager):
 
 def render_dashboard(manager):
     """ダッシュボード画面"""
-    # --- HUD ---
+    # --- HUD (ヘッドアップディスプレイ) ---
     st.markdown('<div class="header-hud">', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        st.title("COMMAND CENTER")
-        st.caption("SYSTEM ONLINE | CREATOR'S COCKPIT v2.0")
+        st.title("メイン・コックピット")
+        st.caption("システム稼働中 | Creator's Cockpit v2.1")
     with c2:
         daily_exp = st.session_state.get('daily_exp', 0)
-        st.metric("DAILY EXP", f"{daily_exp}", delta="+1")
+        st.metric("本日の成果数 (EXP)", f"{daily_exp}", delta="Action!")
     with c3:
-        # Settingsから前回レポート日時取得
         settings = manager.get_records("settings")
-        last_report = "N/A"
+        last_report = "未記録"
         for s in settings:
             if s.get('key') == 'last_report_at':
                 last_report = s.get('value')
-        st.metric("LAST SAVE", last_report[:16] if len(last_report)>10 else last_report)
+        # 日時を短く表示
+        disp_time = last_report[:16] if len(last_report) > 10 else last_report
+        st.metric("最終セーブ (レポート出力)", disp_time)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- MAIN GRID ---
+    # --- メイングリッド ---
     col_main, col_sub = st.columns([2, 1])
 
     with col_main:
-        st.markdown("### > ACTIVE QUESTS (Tasks)")
+        st.markdown("### > 進行中のクエスト (未完了タスク)")
         
-        # タスク取得とフィルタリング
         tasks = manager.get_records("tasks")
         pending_tasks = [t for t in tasks if t.get('status') == '未']
         
         if not pending_tasks:
-            st.info("✨ 全てのクエストを完了しました！")
+            st.info("✨ 現在進行中のクエストはありません。全てのタスク完了です！")
         
-        for task in pending_tasks[:5]: # 最大5件
-            # カード表示
+        for task in pending_tasks[:5]: # 表示は最大5件まで
             border_color = COLORS['accent_cyan']
             if task.get('category') == '制作': border_color = COLORS['accent_warn']
             
             with st.container():
                 cols = st.columns([0.1, 0.9])
                 with cols[0]:
-                    # 完了ボタン
                     if st.button("⬜", key=f"done_{task['id']}", help="完了にする"):
                         manager.update_cell_by_id("tasks", task['id'], "status", "済")
                         manager.update_cell_by_id("tasks", task['id'], "completed_at", get_now_jst())
@@ -338,24 +329,22 @@ def render_dashboard(manager):
                     </div>
                     """, unsafe_allow_html=True)
 
-        # タスク追加フォーム
-        with st.expander("➕ Add New Quest"):
+        with st.expander("➕ 新規クエスト受注 (タスク追加)"):
             with st.form("add_task"):
-                new_title = st.text_input("Title")
-                new_cat = st.selectbox("Category", ["制作", "開発", "学習", "事務", "その他"])
-                new_memo = st.text_area("Memo")
-                if st.form_submit_button("Deploy"):
+                new_title = st.text_input("クエスト名 (タスクタイトル)")
+                new_cat = st.selectbox("カテゴリ", ["制作", "開発", "学習", "事務", "その他"])
+                new_memo = st.text_area("メモ (任意)")
+                if st.form_submit_button("クエスト登録"):
                     new_id = manager.get_next_id("tasks")
                     manager.add_row("tasks", [new_id, new_title, new_cat, "未", new_memo, get_now_jst(), ""])
                     add_log(f"新規クエスト追加: {new_title}")
-                    st.success("Added!")
+                    st.success("タスクを追加しました！")
                     st.rerun()
 
     with col_sub:
-        st.markdown("### > CAMPAIGN MAP")
+        st.markdown("### > プロジェクト戦況")
         projects = manager.get_records("projects")
         
-        # プロジェクト簡易表示
         for proj in projects[:5]:
             status = proj.get('status', '進行中')
             color = COLORS['accent_green'] if status=='完了' else COLORS['accent_blue']
@@ -370,9 +359,9 @@ def render_dashboard(manager):
             </div>
             """, unsafe_allow_html=True)
             
-    # --- LOG ---
+    # --- ログエリア ---
     st.markdown("---")
-    st.markdown("### > SYSTEM LOG")
+    st.markdown("### > システムログ")
     log_area = st.empty()
     logs = st.session_state.get('system_log', [])
     log_text = "<br>".join([f"<span style='color:#00FFFF'>{l}</span>" for l in reversed(logs)])
@@ -381,84 +370,82 @@ def render_dashboard(manager):
 
 def render_project_manager(manager):
     """プロジェクト管理画面"""
-    st.title("📁 CAMPAIGN MANAGER")
+    st.title("📁 プロジェクト作戦本部")
     
     projects = manager.get_records("projects")
     if not projects:
-        st.warning("No Data.")
+        st.warning("プロジェクトデータがありません。")
     
-    # 一覧表示と編集
     for proj in projects:
         with st.expander(f"🔹 {proj.get('theme')} ({proj.get('status')})"):
             c1, c2 = st.columns(2)
             with c1:
-                # 実際のアプリではIDを使って更新処理を書く
-                st.text_input("Theme", value=proj.get('theme'), key=f"p_th_{proj['id']}", disabled=True)
-                st.write(f"Type: {proj.get('type')}")
+                st.text_input("テーマ", value=proj.get('theme'), key=f"p_th_{proj['id']}", disabled=True)
+                st.write(f"タイプ: {proj.get('type')}")
             with c2:
-                st.markdown(f"[Blog]({proj.get('blog_url')}) | [Note]({proj.get('note_url')}) | [Stamp]({proj.get('stamp_url')})")
+                # リンク集
+                links = []
+                if proj.get('blog_url'): links.append(f"[ブログ]({proj.get('blog_url')})")
+                if proj.get('note_url'): links.append(f"[Note]({proj.get('note_url')})")
+                if proj.get('stamp_url'): links.append(f"[スタンプ]({proj.get('stamp_url')})")
+                st.markdown(" | ".join(links) if links else "リンクなし")
             
-            # 簡易ステータス更新ボタン
-            if st.button("Mark Completed", key=f"comp_p_{proj['id']}"):
+            if st.button("プロジェクト完了申請", key=f"comp_p_{proj['id']}"):
                 manager.update_cell_by_id("projects", proj['id'], "status", "完了")
                 manager.update_cell_by_id("projects", proj['id'], "updated_at", get_now_jst())
-                st.success("Updated!")
+                st.success("ステータスを更新しました！")
                 st.rerun()
 
-    with st.expander("➕ New Campaign", expanded=False):
+    with st.expander("➕ 新規プロジェクト立ち上げ", expanded=False):
         with st.form("new_proj"):
-            theme = st.text_input("Theme")
-            ptype = st.selectbox("Type", ["mix", "single"])
-            if st.form_submit_button("Launch"):
+            theme = st.text_input("テーマ名")
+            ptype = st.selectbox("タイプ", ["mix (3媒体)", "single (単発)"])
+            if st.form_submit_button("プロジェクト開始"):
                 new_id = manager.get_next_id("projects")
-                # 簡易実装：URLは空で作成
                 manager.add_row("projects", [new_id, theme, ptype, "", "", "", "進行中", get_now_jst()])
+                st.success("プロジェクトを作成しました！")
                 st.rerun()
 
 
 def render_note_generator(manager):
     """Note記事生成 (差分抽出)"""
-    st.title("📝 REPORT GENERATOR")
+    st.title("📝 活動レポート生成")
     
-    # 前回出力日時の取得
     settings = manager.get_records("settings")
     last_report_at = "2000-01-01 00:00:00"
     for s in settings:
         if s.get('key') == 'last_report_at':
             last_report_at = s.get('value')
     
-    st.info(f"Checking updates since: {last_report_at}")
+    st.info(f"前回のセーブ日時: {last_report_at} 以降の差分を抽出します")
     
-    # データ抽出
     tasks = manager.get_records("tasks")
     projects = manager.get_records("projects")
     
     completed_tasks = [t for t in tasks if t.get('status') == '済' and t.get('completed_at', '') > last_report_at]
     updated_projects = [p for p in projects if p.get('updated_at', '') > last_report_at]
     
-    # テキスト生成
     report_md = "## 🚀 本日の作業ログ\n\n"
     if completed_tasks:
         report_md += "### ✅ 完了クエスト\n"
         for t in completed_tasks:
             report_md += f"- {t['title']} ({t['category']})\n"
+            if t.get('memo'):
+                report_md += f"  - {t['memo']}\n"
     
     if updated_projects:
         report_md += "\n### 🏗 進捗プロジェクト\n"
         for p in updated_projects:
             report_md += f"- {p['theme']} : {p['status']}\n"
             
+    if not completed_tasks and not updated_projects:
+        report_md += "（前回のセーブから更新されたデータはありません）\n"
+
     report_md += "\n### 💭 振り返り\n（ここに感想を書く）\n"
 
-    # プレビュー
-    edited = st.text_area("Report Preview", value=report_md, height=400)
+    edited = st.text_area("レポートプレビュー (編集可能)", value=report_md, height=400)
     
-    if st.button("Generate & Update Timestamp"):
-        # タイムスタンプ更新処理
-        # settingsシートの行を探して更新する処理が必要（簡略化のため追記か更新か判断が必要）
-        # ここでは簡易的に「settingsシートの1行目を上書き」などのロジックにするか、
-        # settingsシートの構造を {'key':..., 'value':...} としているので検索して更新
-        
+    if st.button("レポート出力 ＆ セーブ (日時更新)"):
         settings_sheet = manager.spreadsheet.worksheet("settings")
         cell = settings_sheet.find("last_report_at")
         if cell:
@@ -467,7 +454,7 @@ def render_note_generator(manager):
             settings_sheet.append_row(["last_report_at", get_now_jst()])
             
         manager.clear_cache()
-        st.success("Saved! Timestamp updated.")
+        st.success("セーブ完了！次回はここからの差分になります。")
 
 
 # ==========================================
@@ -475,26 +462,29 @@ def render_note_generator(manager):
 # ==========================================
 def main():
     inject_custom_css()
-    
-    # データマネージャー初期化
     manager = SheetManager()
     
-    # サイドバー
     with st.sidebar:
-        st.title("NAVIGATOR")
-        page = st.radio("Mode Select", ["DASHBOARD", "CAMPAIGN", "ASSETS", "REPORT"])
+        st.title("ナビゲーション")
+        # わかりやすい日本語メニューに変更
+        page_map = {
+            "ダッシュボード": "DASHBOARD",
+            "プロジェクト管理": "CAMPAIGN",
+            "資産・アイデア": "ASSETS",
+            "レポート生成": "REPORT"
+        }
+        selection = st.radio("モード選択", list(page_map.keys()))
+        page = page_map[selection]
         
-        # Warp Gate (新規追加機能)
         render_warp_gate(manager)
     
-    # ページルーティング
     if page == "DASHBOARD":
         render_dashboard(manager)
     elif page == "CAMPAIGN":
         render_project_manager(manager)
     elif page == "ASSETS":
-        st.title("📦 ASSETS")
-        st.info("ここにプロンプト管理などを実装")
+        st.title("📦 資産・アイデアBOX")
+        st.info("ここにプロンプト集やアイデアメモ機能を実装できます")
     elif page == "REPORT":
         render_note_generator(manager)
 
