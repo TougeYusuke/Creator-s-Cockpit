@@ -1250,9 +1250,40 @@ def render_report_generator(manager):
     
     # 活動履歴シートからすべての履歴を取得
     activity_history = manager.get_records("activity_history")
-    recent_activities = [a for a in activity_history if a.get('created_at', '') > last_report_at]
     
-    # 時系列でソート
+    # 日時をdatetimeオブジェクトに変換して比較
+    try:
+        from datetime import datetime
+        import pytz
+        # last_report_atをdatetimeオブジェクトに変換
+        if last_report_at and last_report_at != "2000-01-01 00:00:00":
+            try:
+                last_report_dt = datetime.strptime(last_report_at, '%Y-%m-%d %H:%M:%S')
+            except:
+                # フォーマットが異なる場合のフォールバック
+                last_report_dt = datetime.strptime("2000-01-01 00:00:00", '%Y-%m-%d %H:%M:%S')
+        else:
+            last_report_dt = datetime.strptime("2000-01-01 00:00:00", '%Y-%m-%d %H:%M:%S')
+    except Exception as e:
+        st.warning(f"日時変換エラー: {e}")
+        last_report_dt = datetime.strptime("2000-01-01 00:00:00", '%Y-%m-%d %H:%M:%S')
+    
+    # 日時を比較してフィルタリング
+    recent_activities = []
+    for a in activity_history:
+        created_at_str = a.get('created_at', '')
+        if created_at_str and created_at_str.strip():
+            try:
+                # created_atをdatetimeオブジェクトに変換
+                created_at_dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                if created_at_dt > last_report_dt:
+                    recent_activities.append(a)
+            except Exception as e:
+                # 日時変換に失敗した場合は文字列比較でフォールバック
+                if created_at_str > last_report_at:
+                    recent_activities.append(a)
+    
+    # 時系列でソート（文字列としてソート）
     recent_activities.sort(key=lambda x: x.get('created_at', ''))
     
     # レポート本文作成
