@@ -1442,21 +1442,65 @@ def render_assets_and_ideas(manager):
                     idea_id = row.get("id", "")
                     content = row.get("content", "")
                     created = row.get("created_at", "")
+                    
+                    # 編集中のアイデアIDを管理
+                    edit_key = f"idea_edit_{idea_id}"
+                    is_editing = st.session_state.get(edit_key, False)
 
-                    cols = st.columns([6, 2, 1])
-                    with cols[0]:
-                        st.markdown(f"{content}")
-                        if created:
-                            st.caption(f"登録日時: {created}")
-                    with cols[2]:
-                        if st.button("削除", key=f"idea_del_{idea_id}"):
-                            if idea_id:
-                                ok = manager.delete_row_by_id("ideas", idea_id)
-                                if ok:
-                                    add_log(f"アイデア削除: id={idea_id}")
-                                    st.success("アイデアを削除しました。")
-                                    time.sleep(0.3)
-                                    st.rerun()
+                    if is_editing:
+                        # 編集フォーム
+                        with st.expander(f"✏️ アイデアを編集 (ID: {idea_id})", expanded=True):
+                            with st.form(f"idea_edit_form_{idea_id}"):
+                                edited_content = st.text_area("アイデア内容", value=content, height=4, key=f"idea_edit_content_{idea_id}")
+                                
+                                col_save, col_cancel = st.columns([1, 1])
+                                with col_save:
+                                    if st.form_submit_button("保存", use_container_width=True, type="primary"):
+                                        if edited_content.strip():
+                                            old_content = content
+                                            ok = manager.update_cell_by_id("ideas", idea_id, "content", edited_content)
+                                            if ok:
+                                                # 活動履歴に記録
+                                                manager.add_activity_history(
+                                                    action_type="アイデア編集",
+                                                    entity_type="ideas",
+                                                    entity_id=idea_id,
+                                                    entity_name=edited_content[:50] + "..." if len(edited_content) > 50 else edited_content,
+                                                    old_value=old_content,
+                                                    new_value=edited_content,
+                                                    details=""
+                                                )
+                                                add_log(f"アイデア編集: id={idea_id}")
+                                                st.success("アイデアを更新しました。")
+                                                st.session_state[edit_key] = False
+                                                time.sleep(0.3)
+                                                st.rerun()
+                                        else:
+                                            st.error("アイデア内容を入力してください。")
+                                with col_cancel:
+                                    if st.form_submit_button("キャンセル", use_container_width=True):
+                                        st.session_state[edit_key] = False
+                                        st.rerun()
+                    else:
+                        # 通常表示
+                        cols = st.columns([5, 2, 1, 1])
+                        with cols[0]:
+                            st.markdown(f"{content}")
+                            if created:
+                                st.caption(f"登録日時: {created}")
+                        with cols[2]:
+                            if st.button("編集", key=f"idea_edit_btn_{idea_id}"):
+                                st.session_state[edit_key] = True
+                                st.rerun()
+                        with cols[3]:
+                            if st.button("削除", key=f"idea_del_{idea_id}"):
+                                if idea_id:
+                                    ok = manager.delete_row_by_id("ideas", idea_id)
+                                    if ok:
+                                        add_log(f"アイデア削除: id={idea_id}")
+                                        st.success("アイデアを削除しました。")
+                                        time.sleep(0.3)
+                                        st.rerun()
 
                     # 各アイテムの上に区切り線を表示（先頭要素は除く）
                     if idx != 0:
