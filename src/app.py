@@ -198,6 +198,35 @@ def inject_custom_css():
     div[data-baseweb="tab-highlight"] {{
         background-color: {COLORS['accent_cyan']} !important;
     }}
+    
+    /* クイックランチパッドのボタンスタイル */
+    .launchpad-btn {{
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 12px 8px;
+        background: linear-gradient(145deg, rgba(30,30,35,0.9), rgba(20,20,25,0.8));
+        border: 1px solid rgba(0, 255, 255, 0.2);
+        border-radius: 8px;
+        color: #e0e0e0;
+        text-decoration: none;
+        font-weight: bold;
+        transition: all 0.2s;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        margin-bottom: 8px;
+    }}
+    .launchpad-btn:hover {{
+        background: rgba(0, 255, 255, 0.15);
+        border-color: #00FFFF;
+        color: #fff;
+        transform: translateY(-2px);
+        box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
+    }}
+    .launchpad-icon {{
+        margin-right: 8px;
+        font-size: 1.2rem;
+    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -754,57 +783,349 @@ def extract_urls_as_html(text):
 # 5. コンポーネント (UIパーツ)
 # ==========================================
 
-def render_warp_gate(manager):
-    """サイドバー：外部リンク集"""
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🌌 ワープゲート")
-    
-    # セッション初期化 (全て閉じた状態でスタート)
-    if 'warp_gate_init' not in st.session_state:
-        st.session_state['warp_gate_init'] = True
-    
+def render_quick_launchpad(manager):
+    """ヘッダー直下に配置する一軍リンク集（クイック・ランチパッド）"""
     shortcuts = manager.get_records("shortcuts")
-    
     if not shortcuts:
-        st.sidebar.info("リンク設定がありません (shortcutsシート)")
         return
-
-    df = pd.DataFrame(shortcuts)
-    if 'category' in df.columns:
-        # カテゴリが空欄 or "Root" のものは「フォルダに格納しない」フラット表示
-        cat_series = df['category'].astype(str).fillna("")
-        mask_root = cat_series.str.strip().isin(["", "Root"])
-        df_root = df[mask_root]
-        df_with_cat = df[~mask_root]
-
-        # まず Root / 空カテゴリのリンクをフラット表示
-        for _, item in df_root.iterrows():
-            icon = item.get('icon', '🔗')
-            label = item.get('label', 'Link')
+    
+    # placementが'header'のものだけ抽出
+    header_links = [s for s in shortcuts if str(s.get('placement', '')).lower() == 'header']
+    
+    if not header_links:
+        return
+    
+    st.markdown("##### 🚀 Quick Launch")
+    
+    # 列数を計算 (最大6列程度で折り返し)
+    cols_num = min(len(header_links), 6)
+    cols = st.columns(cols_num)
+    
+    for i, item in enumerate(header_links):
+        col_idx = i % cols_num
+        with cols[col_idx]:
             url = item.get('url', '#')
-            st.sidebar.markdown(f"""
-            <a href="{url}" target="_blank" class="warp-gate-btn">
-                {icon} {label}
-            </a>
-            """, unsafe_allow_html=True)
+            label = item.get('label', 'Link')
+            icon = item.get('icon', '🔗')
+            
+            # ファビコンURLを取得
+            favicon_url = get_favicon_url(url)
+            
+            # ファビコン＋ラベルの形式で表示
+            if favicon_url:
+                st.markdown(f"""
+                <div style="text-align:center; margin-bottom:12px;">
+                    <a href="{url}" target="_blank" style="text-decoration:none; color:inherit;">
+                        <div style="
+                            width:64px; height:64px; margin:0 auto 8px;
+                            background:rgba(40,40,45,0.8);
+                            border-radius:50%;
+                            display:flex; align-items:center; justify-content:center;
+                            border:2px solid rgba(255,255,255,0.1);
+                            transition: all 0.2s;
+                        " onmouseover="this.style.background='rgba(0,255,255,0.15)'; this.style.borderColor='#00FFFF'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 0 15px rgba(0,255,255,0.2)';" onmouseout="this.style.background='rgba(40,40,45,0.8)'; this.style.borderColor='rgba(255,255,255,0.1)'; this.style.transform='translateY(0)'; this.style.boxShadow='none';">
+                            <div style="
+                                width:48px; height:48px;
+                                background:white;
+                                border-radius:4px;
+                                display:flex; align-items:center; justify-content:center;
+                            ">
+                                <img src="{favicon_url}" 
+                                     style="width:40px; height:40px; object-fit:contain;" 
+                                     onerror="this.style.display='none'; this.parentElement.innerHTML='{icon}';" />
+                            </div>
+                        </div>
+                        <div style="
+                            color:{COLORS['text_main']};
+                            font-size:0.85em;
+                            font-weight:500;
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                        ">{label}</div>
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # ファビコンが取得できない場合はアイコンを表示
+                st.markdown(f"""
+                <div style="text-align:center; margin-bottom:12px;">
+                    <a href="{url}" target="_blank" style="text-decoration:none; color:inherit;">
+                        <div style="
+                            width:64px; height:64px; margin:0 auto 8px;
+                            background:rgba(40,40,45,0.8);
+                            border-radius:50%;
+                            display:flex; align-items:center; justify-content:center;
+                            border:2px solid rgba(255,255,255,0.1);
+                            transition: all 0.2s;
+                        " onmouseover="this.style.background='rgba(0,255,255,0.15)'; this.style.borderColor='#00FFFF'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 0 15px rgba(0,255,255,0.2)';" onmouseout="this.style.background='rgba(40,40,45,0.8)'; this.style.borderColor='rgba(255,255,255,0.1)'; this.style.transform='translateY(0)'; this.style.boxShadow='none';">
+                            <div style="
+                                width:48px; height:48px;
+                                background:white;
+                                border-radius:4px;
+                                display:flex; align-items:center; justify-content:center;
+                                font-size:24px;
+                            ">{icon}</div>
+                        </div>
+                        <div style="
+                            color:{COLORS['text_main']};
+                            font-size:0.85em;
+                            font-weight:500;
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                        ">{label}</div>
+                    </a>
+                </div>
+                """, unsafe_allow_html=True)
 
-        # それ以外のカテゴリはフォルダ（expander）として表示
-        if not df_with_cat.empty:
-            categories = df_with_cat['category'].unique()
+def get_favicon_url(url):
+    """URLからファビコンURLを生成"""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain = parsed.netloc or parsed.path.split('/')[0]
+        if domain:
+            # GoogleのファビコンAPIを使用
+            return f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
+    except:
+        pass
+    return None
+
+def truncate_label(label, max_length=6):
+    """ラベルを指定文字数に切り詰め（日本語対応）"""
+    if not label:
+        return ""
+    if len(label) <= max_length:
+        return label
+    return label[:max_length] + "..."
+
+def show_warpgate_modal_content(manager):
+    """モーダルウィンドウ内に全リンクを表示（Quick Launchの項目も含む）"""
+    shortcuts = manager.get_records("shortcuts")
+    if not shortcuts:
+        st.info("ショートカット設定がありません")
+        return
+    
+    df = pd.DataFrame(shortcuts)
+    
+    # 全てのリンクを表示（placementが'header'のものも含む）
+    library_links = df
+    
+    if library_links.empty:
+        st.info("ワープゲートに表示するリンクがありません")
+        return
+    
+    st.caption("全てのブックマークへのアクセス")
+    
+    # カテゴリごとに分類表示
+    if 'category' in library_links.columns:
+        categories = library_links['category'].astype(str).fillna("").unique()
+        categories = [c for c in categories if c.strip()]
+        
+        if categories:
             for cat in categories:
-                folder_label = f"📂 {cat}"
-                with st.sidebar.expander(folder_label, expanded=False):
-                    cat_items = df_with_cat[df_with_cat['category'] == cat]
-                    for _, item in cat_items.iterrows():
-                        icon = item.get('icon', '🔗')
+                st.markdown(f"### 📂 {cat}")
+                cat_items = library_links[library_links['category'].astype(str).fillna("") == cat]
+                
+                # 6列グリッドでリンクを表示（ファビコン＋6文字ラベル形式）
+                cols = st.columns(6)
+                for idx, (_, item) in enumerate(cat_items.iterrows()):
+                    with cols[idx % 6]:
                         label = item.get('label', 'Link')
                         url = item.get('url', '#')
+                        icon = item.get('icon', '🔗')
                         
+                        # ファビコンURLを取得
+                        favicon_url = get_favicon_url(url)
+                        
+                        # ラベルを6文字に切り詰め
+                        truncated_label = truncate_label(label, 6)
+                        
+                        # ファビコン＋6文字ラベルの形式で表示
+                        if favicon_url:
+                            st.markdown(f"""
+                            <div style="text-align:center; margin-bottom:12px;">
+                                <a href="{url}" target="_blank" style="text-decoration:none; color:inherit;">
+                                    <div style="
+                                        width:64px; height:64px; margin:0 auto 8px;
+                                        background:rgba(40,40,45,0.8);
+                                        border-radius:50%;
+                                        display:flex; align-items:center; justify-content:center;
+                                        border:2px solid rgba(255,255,255,0.1);
+                                    ">
+                                        <div style="
+                                            width:48px; height:48px;
+                                            background:white;
+                                            border-radius:4px;
+                                            display:flex; align-items:center; justify-content:center;
+                                        ">
+                                            <img src="{favicon_url}" 
+                                                 style="width:40px; height:40px; object-fit:contain;" 
+                                                 onerror="this.style.display='none'; this.parentElement.innerHTML='{icon}';" />
+                                        </div>
+                                    </div>
+                                    <div style="
+                                        color:{COLORS['text_main']};
+                                        font-size:0.85em;
+                                        font-weight:500;
+                                        white-space: nowrap;
+                                        overflow: hidden;
+                                        text-overflow: ellipsis;
+                                    ">{truncated_label}</div>
+                                </a>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            # ファビコンが取得できない場合はアイコンを表示
+                            st.markdown(f"""
+                            <div style="text-align:center; margin-bottom:12px;">
+                                <a href="{url}" target="_blank" style="text-decoration:none; color:inherit;">
+                                    <div style="
+                                        width:64px; height:64px; margin:0 auto 8px;
+                                        background:rgba(40,40,45,0.8);
+                                        border-radius:50%;
+                                        display:flex; align-items:center; justify-content:center;
+                                        border:2px solid rgba(255,255,255,0.1);
+                                    ">
+                                        <div style="
+                                            width:48px; height:48px;
+                                            background:white;
+                                            border-radius:4px;
+                                            display:flex; align-items:center; justify-content:center;
+                                            font-size:24px;
+                                        ">{icon}</div>
+                                    </div>
+                                    <div style="
+                                        color:{COLORS['text_main']};
+                                        font-size:0.85em;
+                                        font-weight:500;
+                                        white-space: nowrap;
+                                        overflow: hidden;
+                                        text-overflow: ellipsis;
+                                    ">{truncated_label}</div>
+                                </a>
+                            </div>
+                            """, unsafe_allow_html=True)
+                st.markdown("---")
+        
+        # カテゴリが空欄のリンクを表示
+        no_cat_items = library_links[library_links['category'].astype(str).fillna("").str.strip() == ""]
+        if not no_cat_items.empty:
+            st.markdown("### 📌 その他")
+            cols = st.columns(6)
+            for idx, (_, item) in enumerate(no_cat_items.iterrows()):
+                with cols[idx % 6]:
+                    label = item.get('label', 'Link')
+                    url = item.get('url', '#')
+                    icon = item.get('icon', '🔗')
+                    
+                    # ファビコンURLを取得
+                    favicon_url = get_favicon_url(url)
+                    
+                    # ラベルを6文字に切り詰め
+                    truncated_label = truncate_label(label, 6)
+                    
+                    # ファビコン＋6文字ラベルの形式で表示
+                    if favicon_url:
                         st.markdown(f"""
-                        <a href="{url}" target="_blank" class="warp-gate-btn">
-                            {icon} {label}
-                        </a>
+                        <div style="text-align:center; margin-bottom:12px;">
+                            <a href="{url}" target="_blank" style="text-decoration:none; color:inherit;">
+                                <div style="
+                                    width:64px; height:64px; margin:0 auto 8px;
+                                    background:rgba(40,40,45,0.8);
+                                    border-radius:50%;
+                                    display:flex; align-items:center; justify-content:center;
+                                    border:2px solid rgba(255,255,255,0.1);
+                                ">
+                                    <div style="
+                                        width:48px; height:48px;
+                                        background:white;
+                                        border-radius:4px;
+                                        display:flex; align-items:center; justify-content:center;
+                                    ">
+                                        <img src="{favicon_url}" 
+                                             style="width:40px; height:40px; object-fit:contain;" 
+                                             onerror="this.style.display='none'; this.parentElement.innerHTML='{icon}';" />
+                                    </div>
+                                </div>
+                                <div style="
+                                    color:{COLORS['text_main']};
+                                    font-size:0.85em;
+                                    font-weight:500;
+                                    white-space: nowrap;
+                                    overflow: hidden;
+                                    text-overflow: ellipsis;
+                                ">{truncated_label}</div>
+                            </a>
+                        </div>
                         """, unsafe_allow_html=True)
+                    else:
+                        # ファビコンが取得できない場合はアイコンを表示
+                        st.markdown(f"""
+                        <div style="text-align:center; margin-bottom:12px;">
+                            <a href="{url}" target="_blank" style="text-decoration:none; color:inherit;">
+                                <div style="
+                                    width:64px; height:64px; margin:0 auto 8px;
+                                    background:rgba(40,40,45,0.8);
+                                    border-radius:50%;
+                                    display:flex; align-items:center; justify-content:center;
+                                    border:2px solid rgba(255,255,255,0.1);
+                                ">
+                                    <div style="
+                                        width:48px; height:48px;
+                                        background:white;
+                                        border-radius:4px;
+                                        display:flex; align-items:center; justify-content:center;
+                                        font-size:24px;
+                                    ">{icon}</div>
+                                </div>
+                                <div style="
+                                    color:{COLORS['text_main']};
+                                    font-size:0.85em;
+                                    font-weight:500;
+                                    white-space: nowrap;
+                                    overflow: hidden;
+                                    text-overflow: ellipsis;
+                                ">{truncated_label}</div>
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+def render_warp_gate_trigger(manager):
+    """サイドバー：ワープゲート起動ボタン"""
+    st.sidebar.markdown("---")
+    
+    # 起動ボタン
+    if st.sidebar.button("🌌 ワープゲートを開く", use_container_width=True, type="primary"):
+        st.session_state['show_warpgate'] = True
+        st.rerun()
+    
+    # モーダル表示（st.dialogが使えない場合はメイン画面にexpanderで表示）
+    if st.session_state.get('show_warpgate', False):
+        # Streamlit 1.34.0以降のst.dialogを試行、失敗した場合はexpanderで代用
+        try:
+            # st.dialogが利用可能かチェック
+            if hasattr(st, 'dialog'):
+                with st.dialog("🌌 ワープゲート (Link Library)"):
+                    show_warpgate_modal_content(manager)
+                    if st.button("閉じる", use_container_width=True):
+                        st.session_state['show_warpgate'] = False
+                        st.rerun()
+            else:
+                # st.dialogが使えない場合はメイン画面にexpanderで表示（自動展開）
+                with st.expander("🌌 ワープゲート (Link Library)", expanded=True):
+                    show_warpgate_modal_content(manager)
+                    if st.button("閉じる", use_container_width=True):
+                        st.session_state['show_warpgate'] = False
+                        st.rerun()
+        except Exception:
+            # エラー時はメイン画面にexpanderで表示（自動展開）
+            with st.expander("🌌 ワープゲート (Link Library)", expanded=True):
+                show_warpgate_modal_content(manager)
+                if st.button("閉じる", use_container_width=True):
+                    st.session_state['show_warpgate'] = False
+                    st.rerun()
 
 def render_dashboard(manager):
     """ダッシュボード (メイン画面)"""
@@ -846,6 +1167,9 @@ def render_dashboard(manager):
                     else:
                         st.error("アイデア内容を入力してください。")
 
+    # --- クイック・ランチパッド (ヘッダー直下) ---
+    render_quick_launchpad(manager)
+    
     # --- HUD (上部ステータス) ---
     st.markdown('<div class="header-hud">', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2, 1, 1])
@@ -1647,7 +1971,7 @@ def main():
         if st.button("📝 レポート出力", use_container_width=True):
             st.session_state['current_page'] = "REPORT"
             
-        render_warp_gate(manager)
+        render_warp_gate_trigger(manager)
     
     # ページルーティング
     page = st.session_state['current_page']
