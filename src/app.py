@@ -966,6 +966,7 @@ def render_dashboard(manager):
         for proj in display_list[:5]: # 最大5件表示
             status = proj.get('status', '進行中')
             theme = proj.get('theme', 'No Theme')
+            current_memo = proj.get('memo', '')
             
             # ステータス色分け
             color = COLORS['accent_blue']
@@ -976,29 +977,108 @@ def render_dashboard(manager):
             # リンクHTML生成
             links_html = extract_urls_as_html(proj.get('links', ''))
             
-            # HTMLカード描画
-            st.markdown(f"""
-            <div style="
-                margin-bottom:12px; 
-                padding:12px; 
-                border:1px solid {color}44; 
-                border-left: 3px solid {color};
-                border-radius:4px;
-                background: rgba(20,20,20,0.4);
-            ">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-weight:bold; color:{COLORS['text_main']}">{theme}</span>
-                    <span style="
-                        font-size:0.7em; 
-                        color:{color}; 
-                        border:1px solid {color}; 
-                        padding:1px 6px; 
-                        border-radius:10px;
-                    ">{status}</span>
+            # メモ編集用のキー
+            edit_memo_key = f"dashboard_edit_memo_{proj['id']}"
+            is_editing_memo = st.session_state.get(edit_memo_key, False)
+            
+            if is_editing_memo:
+                # 編集モード - カード全体を再構築
+                st.markdown(f"""
+                <div style="
+                    margin-bottom:12px; 
+                    padding:12px; 
+                    border:1px solid {color}44; 
+                    border-left: 3px solid {color};
+                    border-radius:4px;
+                    background: rgba(20,20,20,0.4);
+                ">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:bold; color:{COLORS['text_main']}">{theme}</span>
+                        <span style="
+                            font-size:0.7em; 
+                            color:{color}; 
+                            border:1px solid {color}; 
+                            padding:1px 6px; 
+                            border-radius:10px;
+                        ">{status}</span>
+                    </div>
+                    <div style="margin-top:8px;">{links_html}</div>
                 </div>
-                <div style="margin-top:8px;">{links_html}</div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+                
+                # 編集フォームを表示
+                with st.form(f"dashboard_memo_edit_{proj['id']}"):
+                    new_memo = st.text_area("💬 メモ", value=current_memo, height=4, key=f"dashboard_memo_{proj['id']}")
+                    col_save, col_cancel = st.columns([1, 1])
+                    with col_save:
+                        if st.form_submit_button("保存", use_container_width=True, type="primary"):
+                            if new_memo != current_memo:
+                                old_memo = current_memo
+                                now_str = get_now_jst()
+                                manager.update_cell_by_id("projects", proj['id'], "memo", new_memo)
+                                manager.update_cell_by_id("projects", proj['id'], "memo_updated_at", now_str)
+                                # 活動履歴に記録
+                                manager.add_activity_history(
+                                    action_type="プロジェクトコメント更新",
+                                    entity_type="projects",
+                                    entity_id=proj['id'],
+                                    entity_name=theme,
+                                    old_value=old_memo,
+                                    new_value=new_memo,
+                                    details=""
+                                )
+                                # 後方互換性のため、project_comments_historyにも記録
+                                manager.add_comment_history(proj['id'], theme, new_memo, now_str)
+                                add_log(f"プロジェクトメモ更新(ダッシュボード): {theme}")
+                                st.success("メモを更新しました")
+                                st.session_state[edit_memo_key] = False
+                                time.sleep(0.3)
+                                st.rerun()
+                            else:
+                                st.session_state[edit_memo_key] = False
+                                st.rerun()
+                    with col_cancel:
+                        if st.form_submit_button("キャンセル", use_container_width=True):
+                            st.session_state[edit_memo_key] = False
+                            st.rerun()
+            else:
+                # 通常表示モード - メモを含む完全なカードを表示
+                # メモ表示用HTML
+                if current_memo:
+                    memo_lines = current_memo.replace('\n', '<br>')
+                    memo_html = f'<div style="margin-top:8px; padding:8px; background:rgba(0,0,0,0.2); border-radius:4px; color:{COLORS["text_dim"]}; font-size:0.9em; white-space:pre-wrap;">💬 {memo_lines}</div>'
+                else:
+                    memo_html = '<div style="margin-top:8px; padding:8px; background:rgba(0,0,0,0.1); border-radius:4px; color:rgba(160,160,160,0.5); font-size:0.85em; font-style:italic;">💬 メモがありません</div>'
+                
+                # HTMLカード描画（メモを含む、完全に閉じる）
+                st.markdown(f"""
+                <div style="
+                    margin-bottom:12px; 
+                    padding:12px; 
+                    border:1px solid {color}44; 
+                    border-left: 3px solid {color};
+                    border-radius:4px;
+                    background: rgba(20,20,20,0.4);
+                ">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:bold; color:{COLORS['text_main']}">{theme}</span>
+                        <span style="
+                            font-size:0.7em; 
+                            color:{color}; 
+                            border:1px solid {color}; 
+                            padding:1px 6px; 
+                            border-radius:10px;
+                        ">{status}</span>
+                    </div>
+                    <div style="margin-top:8px;">{links_html}</div>
+                    {memo_html}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # 編集ボタン（カードの下に配置）
+                if st.button("✏️ メモを編集", key=f"dashboard_edit_btn_{proj['id']}", use_container_width=True):
+                    st.session_state[edit_memo_key] = True
+                    st.rerun()
             
         if st.button("プロジェクト一覧へ移動", use_container_width=True):
             st.session_state['current_page'] = "CAMPAIGN"
