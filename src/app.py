@@ -1252,11 +1252,15 @@ def render_dashboard(manager):
                 
                 new_memo = st.text_area("メモ (任意)", height=3, key=f"task_memo_{st.session_state.task_form_key}")
                 
+                add_and_complete = st.checkbox("追加と同時に完了にする", key=f"task_complete_{st.session_state.task_form_key}")
+                
                 if st.form_submit_button("登録する", use_container_width=True):
                     if new_title:
                         new_id = manager.get_next_id("tasks")
                         now_str = get_now_jst()
-                        manager.add_row("tasks", [new_id, new_title, new_cat, "未", new_memo, now_str, ""])
+                        status_val = "済" if add_and_complete else "未"
+                        completed_at = now_str if add_and_complete else ""
+                        manager.add_row("tasks", [new_id, new_title, new_cat, status_val, new_memo, now_str, completed_at])
                         # 活動履歴に記録
                         manager.add_activity_history(
                             action_type="タスク追加",
@@ -1264,10 +1268,10 @@ def render_dashboard(manager):
                             entity_id=new_id,
                             entity_name=new_title,
                             old_value="",
-                            new_value="未",
-                            details=f"カテゴリ: {new_cat}" + (f", メモ: {new_memo}" if new_memo else "")
+                            new_value=status_val,
+                            details=f"カテゴリ: {new_cat}" + (f", メモ: {new_memo}" if new_memo else "") + (" | 即完了" if add_and_complete else "")
                         )
-                        add_log(f"新規クエスト追加: {new_title}")
+                        add_log(f"新規クエスト追加: {new_title}" + (" (即完了)" if add_and_complete else ""))
                         # フォームをリセットするためにキーを変更
                         st.session_state.task_form_key += 1
                         st.success("登録しました")
